@@ -12,8 +12,8 @@ export const Settings = z
     regexFilters: z.string().default(
       [
         '<StatusPlaceHolderImpl\\/>',
-        '\\s*<!--[\\s\\S]*?-->\\s*',
-        '(<disclaimer>.*?<\\/disclaimer>)|(<guifan>.*?<\\/guifan>)|```start|<content>|<\\/content>|```end|<done>|`<done>`|(<!--\\s*consider\\s*:\\s*(.*?)\\s*-->)|(.*?<\\/think(ing)?>(\\n)?)|(<think(ing)?>[\\s\\S]*?<\\/think(ing)?>(\\n)?)',
+        '\\\\s*<!--[\\\\s\\\\S]*?-->\\\\s*',
+        '(<disclaimer>.*?<\\/disclaimer>)|(<guifan>.*?<\\/guifan>)|```start|<content>|<\\/content>|```end|<done>|`<done>`|(<!--\\\\s*consider\\\\s*:\\\\s*(.*?)\\\\s*-->)|(.*?<\\/think(ing)?>(\\\\n)?)|(<think(ing)?>[\\\\s\\\\S]*?<\\/think(ing)?>(\\\\n)?)',
       ].join('\n')
     ),
     disableNotifications: z.boolean().default(false),
