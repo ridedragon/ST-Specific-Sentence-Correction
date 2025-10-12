@@ -139,7 +139,7 @@ import CustomSlider from '@/components/CustomSlider.vue';
 import { useSettingsStore } from '@/store/settings';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, cleanTextWithRegex } from '@/core';
+import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, checkMessageForDisabledWords } from '@/core';
 
 const { settings } = storeToRefs(useSettingsStore());
 const modelList = ref<string[]>([]);
@@ -158,21 +158,8 @@ watch(lastCharMessageContent, (newMessage, oldMessage) => {
     return;
   }
 
-  const disabledWords = (settings.value.disabledWords || '').split(',').map(w => w.trim()).filter(Boolean);
-  if (disabledWords.length === 0) {
-    return;
-  }
-
-  // 先用正则清理，再检查禁用词
-  const cleanedMessage = cleanTextWithRegex(newMessage);
-
-  // 修正：移除 \b 并对特殊字符进行转义，以支持中文和特殊字符
-  const hasDisabledWord = disabledWords.some(word => {
-    const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    return new RegExp(escapedWord, 'i').test(cleanedMessage);
-  });
-
-  if (hasDisabledWord) {
+  // 使用新的核心函数来检查禁用词（先清理后检查）
+  if (checkMessageForDisabledWords(newMessage)) {
     console.log('[AI Optimizer] Detected disabled word in new message, triggering auto-optimization.');
     lastProcessedMessage.value = newMessage; // 标记为已处理
     handleFullAutoOptimize();

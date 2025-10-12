@@ -78,10 +78,10 @@ async function onGenerationEnded(messageId: number) {
     return;
   }
   const latestMessage = messages[0];
-  const originalMessageText = latestMessage.message;
+  const messageText = latestMessage.message;
 
-  // 先用正则清理，再检查禁用词
-  const cleanedMessageText = cleanTextWithRegex(originalMessageText);
+  // 步骤 1: 先对整个消息进行清理
+  const cleanedMessage = cleanTextWithRegex(messageText);
 
   // 检查禁用词
   const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
@@ -89,24 +89,24 @@ async function onGenerationEnded(messageId: number) {
     return;
   }
 
-  const foundWords = disabledWords.filter((word: string) => new RegExp(`\\b${word}\\b`, 'i').test(cleanedMessageText));
+  // 步骤 2: 在清理后的文本中查找禁用词
+  const hasDisabledWord = checkMessageForDisabledWords(messageText);
 
-  if (foundWords.length > 0) {
-    console.log(`Found disabled words in cleaned text: ${foundWords.join(', ')}`);
+  if (hasDisabledWord) {
+    console.log(`[AI Optimizer] Found disabled words in cleaned message.`);
     
     // 自动优化流程
     try {
       showToast('info', '检测到禁用词，自动优化流程已启动...');
-      // 在原始文本中提取句子，以保留上下文
-      const sentences = extractSentencesWithWords(originalMessageText, foundWords);
+      // 注意：这里我们从清理后的消息中提取句子
+      const sentences = extractSentencesWithWords(cleanedMessage, disabledWords);
       if (sentences.length === 0) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
       }
       
-      // 清理并编号，与手动流程保持一致
-      const cleanedContent = cleanTextWithRegex(sentences.join('\n'));
-      const sourceContent = cleanedContent.split('\n').map((s, i) => `${i + 1}. ${s}`).join('\n');
+      // 此时句子已经是干净的，直接编号即可
+      const sourceContent = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
 
       showToast('success', '句子提取成功，正在发送给AI优化...');
       const optimizedResultText = await getOptimizedText(sourceContent);
@@ -123,6 +123,26 @@ async function onGenerationEnded(messageId: number) {
       showToast('error', error.message, '自动化流程失败', { timeOut: 10000 });
     }
   }
+}
+
+/**
+ * 检查消息中是否包含禁用词（先清理后检查）。
+ * @param messageText 要检查的消息文本。
+ * @returns 如果找到禁用词则返回 true，否则返回 false。
+ */
+export function checkMessageForDisabledWords(messageText: string): boolean {
+  const settings = getPluginSettings();
+  const cleanedMessage = cleanTextWithRegex(messageText);
+  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+
+  if (disabledWords.length === 0) {
+    return false;
+  }
+
+  return disabledWords.some(word => {
+    const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    return new RegExp(escapedWord, 'i').test(cleanedMessage);
+  });
 }
 
 /**
@@ -614,6 +634,9 @@ export function manualOptimize(callback: (content: string) => void) {
   console.log(`[AI Optimizer] Found last character message with ID: ${lastCharMessage.mes_id}`);
   const messageText = lastCharMessage.mes;
 
+  // 步骤 1: 先对整个消息进行清理
+  const cleanedMessage = cleanTextWithRegex(messageText);
+
   const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
   if (disabledWords.length === 0) {
     showToast('warning', '未设置禁用词，无法提取。');
@@ -621,13 +644,12 @@ export function manualOptimize(callback: (content: string) => void) {
     return;
   }
 
-  const sentences = extractSentencesWithWords(messageText, disabledWords);
+  // 步骤 2: 在清理后的文本中提取句子
+  const sentences = extractSentencesWithWords(cleanedMessage, disabledWords);
 
   if (sentences.length > 0) {
-    const joinedSentences = sentences.join('\n');
-    const cleanedContent = cleanTextWithRegex(joinedSentences);
-    showToast('success', '已提取并清理待优化内容。');
-    const numberedSentences = cleanedContent.split('\n').map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
+    showToast('success', '已提取待优化内容。');
+    const numberedSentences = sentences.map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
     callback(numberedSentences);
   } else {
     // 在 Panel.vue 中处理此情况的UI反馈
@@ -641,7 +663,7 @@ export function manualOptimize(callback: (content: string) => void) {
  * @param text 要清理的文本。
  * @returns 清理后的文本。
  */
-export function cleanTextWithRegex(text: string): string {
+function cleanTextWithRegex(text: string): string {
   const settings = getPluginSettings();
   const regexFilters = settings.regexFilters || '';
 
