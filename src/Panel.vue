@@ -350,7 +350,6 @@ onUnmounted(() => {
 
 /* 优化滑动条样式，确保在移动设备上正常显示 */
 .slider {
-  position: relative; /* 确保滑块的定位上下文正确 */
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
