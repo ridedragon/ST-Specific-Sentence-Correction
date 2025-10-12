@@ -1,0 +1,92 @@
+// ==TavernScript==
+// @name         一键优化并替换 (V3-带状态提示)
+// @description  通过直接调用扩展的核心函数，并提供详细的步骤提示，自动化执行加载、优化和替换的完整流程。
+// @version      3.0
+// @author       Cline
+// ==/TavernScript==
+
+// --- 使用说明 ---
+// 1. 确保您的 "AI 文本优化助手" 扩展已更新到包含函数暴露功能的版本并已成功构建。
+// 2. 在SillyTavern的“按钮触发” (Button Trigger) 面板中创建一个新按钮。
+// 3. 将本脚本的全部内容粘贴到该按钮的 "Script" 编辑区域。
+// 4. 保存并使用。此版本无需任何额外配置。
+
+(async function() {
+    'use strict';
+
+    // 确保 toastr 存在
+    if (typeof toastr === 'undefined') {
+        alert('错误：toastr 通知库未加载，无法显示状态提示。');
+        return;
+    }
+
+    try {
+        console.log('【V3脚本】启动...');
+        toastr.info('自动化优化流程已启动...');
+
+        // --- 步骤 0: 检查核心API是否存在 ---
+        if (typeof (window as any).aiOptimizer?.manualOptimize !== 'function' ||
+            typeof (window as any).aiOptimizer?.optimizeText !== 'function' ||
+            typeof (window as any).aiOptimizer?.replaceMessage !== 'function') {
+            
+            throw new Error('AI 文本优化助手的核心函数 (window.aiOptimizer) 未找到。请确认扩展已正确加载并成功构建。');
+        }
+        const { manualOptimize, optimizeText, replaceMessage } = (window as any).aiOptimizer;
+        console.log('【V3脚本】核心函数已找到。');
+
+
+        // --- 步骤 1: 调用 manualOptimize 函数，提取需要优化的内容 ---
+        console.log('【V3脚本】步骤 1/4: 正在提取待优化句子...');
+        const sourceContent = await new Promise<string>((resolve, reject) => {
+            try {
+                manualOptimize((content: string) => {
+                    if (content) {
+                        resolve(content);
+                    } else {
+                        reject(new Error('在最后一条消息中未找到包含禁用词的句子。'));
+                    }
+                });
+            } catch (e) {
+                reject(e);
+            }
+        });
+        console.log('【V3脚本】已成功提取待优化内容。');
+        toastr.success('句子提取成功，正在发送给AI优化...');
+
+
+        // --- 步骤 2: 调用 optimizeText 函数，将内容发送给 AI ---
+        console.log('【V3脚本】步骤 2/4: 正在发送给 AI 进行优化...');
+        const optimizedResult = await optimizeText(sourceContent, undefined);
+
+        if (!optimizedResult) {
+            throw new Error('AI 未能返回优化后的文本。');
+        }
+        console.log('【V3脚本】AI 优化完成。');
+        toastr.success('AI优化完成，正在执行替换...');
+
+        
+        // --- 步骤 3: 调用 replaceMessage 函数，执行替换 ---
+        console.log('【V3脚本】步骤 3/4: 正在执行替换操作...');
+        await new Promise<void>((resolve, reject) => {
+            try {
+                // replaceMessage 的回调函数会在后台触发，我们在这里仅确认它被调用
+                replaceMessage(sourceContent, optimizedResult, (newContent: string) => {
+                    console.log('【V3脚本】替换操作已在后台触发。新内容预览:', newContent);
+                    resolve();
+                });
+            } catch(e) {
+                reject(e);
+            }
+        });
+        console.log('【V3脚本】替换操作已触发。');
+        toastr.success('替换完成！流程结束。');
+
+
+        // --- 步骤 4: 结束 ---
+        console.log('【V3脚本】步骤 4/4: 流程执行完毕！');
+
+    } catch (error: any) {
+        console.error('【V3脚本】执行出错:', error);
+        toastr.error(`脚本执行失败: ${error.message}`, '错误', { timeOut: 10000 });
+    }
+})();

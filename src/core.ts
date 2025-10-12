@@ -1,0 +1,800 @@
+import { getContext, extension_settings } from '@sillytavern/scripts/extensions';
+import { Settings, setting_field } from './type/settings';
+
+// 类型安全的设置获取辅助函数
+function getPluginSettings(): Settings {
+  return ((extension_settings as any)[setting_field] as Settings) ?? {};
+}
+
+// 通知辅助函数
+function showToast(type: 'success' | 'info' | 'warning' | 'error', message: string, title?: string, options?: any) {
+  const settings = getPluginSettings();
+  const allowedMessages = [
+    '自动优化中。',
+    '优化成功🎉。',
+    '优化失败😭。',
+    '在最后一条角色消息中未找到包含禁用词的句子。',
+  ];
+
+  if (settings.disableNotifications && !allowedMessages.includes(message)) {
+    return;
+  }
+
+  (toastr as any)[type](message, title, options);
+}
+
+/**
+ * 插件的核心初始化函数。
+ * 在这里注册事件监听和设置UI。
+ */
+export function initialize() {
+  // 防止重复初始化
+  if ((window as any).isAiOptimizerInitialized) {
+    console.log('[AI Optimizer] Already initialized. Skipping.');
+    return;
+  }
+  console.log('[AI Optimizer] Core initialization started.');
+
+  const context = getContext();
+  if (!context) {
+    console.error('[AI Optimizer] Failed to get context. Initialization aborted.');
+    showToast('error', 'AI 文本优化助手: 获取上下文失败，插件无法启动。');
+    return;
+  }
+  console.log('[AI Optimizer] Context obtained successfully.');
+
+  if (!context.eventSource || typeof context.eventSource.on !== 'function') {
+    console.error('[AI Optimizer] eventSource is not available on context. Initialization aborted.');
+    showToast('error', 'AI 文本优化助手: 事件系统不可用，插件无法启动。');
+    return;
+  }
+  console.log('[AI Optimizer] eventSource is available.');
+
+  // 监听角色消息渲染完成事件，这个事件在消息完全显示后触发，更可靠
+  context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onGenerationEnded);
+  console.log('[AI Optimizer] "CHARACTER_MESSAGE_RENDERED" event listener registered.');
+  
+  showToast('success', 'AI 文本优化助手已成功加载！');
+  (window as any).isAiOptimizerInitialized = true;
+}
+
+/**
+ * 当AI生成结束时触发的回调函数。
+ * @param messageId 生成的消息的ID。
+ */
+async function onGenerationEnded(messageId: number) {
+  const settings = getPluginSettings();
+
+  // 检查插件是否已启用
+  if (!settings.autoOptimize) {
+    return;
+  }
+
+  console.log(`Generation ended for message ${messageId}. Checking for disabled words.`);
+
+  // 获取最新消息
+  const messages = (window as any).TavernHelper.getChatMessages(messageId);
+  if (!messages || messages.length === 0) {
+    return;
+  }
+  const latestMessage = messages[0];
+  const messageText = latestMessage.message;
+
+  // 检查禁用词
+  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  if (disabledWords.length === 0) {
+    return;
+  }
+
+  const foundWords = disabledWords.filter((word: string) => new RegExp(`\\b${word}\\b`, 'i').test(messageText));
+
+  if (foundWords.length > 0) {
+    console.log(`Found disabled words: ${foundWords.join(', ')}`);
+    
+    // 自动优化流程
+    try {
+      showToast('info', '检测到禁用词，自动优化流程已启动...');
+      const sentences = extractSentencesWithWords(messageText, foundWords);
+      if (sentences.length === 0) {
+        showToast('info', '在消息中未找到包含禁用词的完整句子。');
+        return;
+      }
+      const sourceContent = sentences.join('\n');
+
+      showToast('success', '句子提取成功，正在发送给AI优化...');
+      const optimizedResultText = await getOptimizedText(sourceContent);
+      if (!optimizedResultText) {
+        throw new Error('AI 未能返回优化后的文本。');
+      }
+
+      showToast('success', 'AI优化完成，正在执行替换...');
+      await replaceMessageInternal(latestMessage, sourceContent, optimizedResultText);
+      showToast('success', '自动优化完成！', '成功', { timeOut: 5000 });
+
+    } catch (error: any) {
+      console.error('[Auto Optimizer] 流程执行出错:', error);
+      showToast('error', error.message, '自动化流程失败', { timeOut: 10000 });
+    }
+  }
+}
+
+/**
+ * 高亮指定消息中的禁用词。
+ * @param messageId 要高亮的消息ID。
+ * @param words 要高亮的单词数组。
+ */
+function highlightDisabledWords(messageId: number, words: string[]) {
+  const messageElement = (window as any).TavernHelper.retrieveDisplayedMessage(messageId);
+  if (!messageElement || messageElement.length === 0) {
+    return;
+  }
+
+  let currentHtml = messageElement.html();
+
+  // 为每个禁用词创建一个不区分大小写的全局正则表达式
+  words.forEach(word => {
+    const regex = new RegExp(`\\b(${word})\\b`, 'gi');
+    currentHtml = currentHtml.replace(regex, '<span class="ai-optimizer-highlight">$1</span>');
+  });
+
+  messageElement.html(currentHtml);
+}
+
+/**
+ * 显示优化弹窗，并处理优化和替换逻辑。
+ * @param originalMessage 原始的AI消息对象。
+ * @param foundWords 检测到的禁用词数组。
+ * @param isManual 是否为手动触发。
+ */
+async function showOptimizationPopup(originalMessage: any, foundWords: string[], isManual: boolean) {
+  const context = getContext();
+  const settings = getPluginSettings();
+
+  const sentencesToOptimize = isManual
+    ? [originalMessage.message]
+    : extractSentencesWithWords(originalMessage.message, foundWords);
+
+  if (sentencesToOptimize.length === 0) {
+    // (toastr as any).info('在消息中未找到包含禁用词的句子。');
+    return;
+  }
+
+  const initialText = sentencesToOptimize.join('\n');
+
+  const popupId = 'ai-optimizer-manual-popup';
+  const popupTitle = '编辑优化内容';
+  const popupContent = `
+    <div id="${popupId}">
+      <p>以下是提取出的待优化内容（可编辑）：</p>
+      <textarea id="optimizer-input" class="text_pole" rows="8" style="width: 100%;">${initialText}</textarea>
+    </div>
+  `;
+
+  console.log('[AI Optimizer] Showing optimization popup...');
+  const result = await (context as any).callGenericPopup(popupContent, popupTitle, '', {
+    wide: true,
+    okButton: '发送给 AI',
+    cancelButton: '取消',
+  });
+
+  if (result) {
+    const textToSend = ($(`#${popupId} #optimizer-input`) as any).val();
+    console.log('--- Sending to AI for Optimization ---');
+    console.log('System Prompt:', getSystemPrompt());
+    console.log('User Content:', textToSend);
+    console.log('------------------------------------');
+
+    showToast('info', '正在发送给 AI 进行优化...');
+    const optimizedText = await getOptimizedText(textToSend);
+
+    if (optimizedText) {
+      await showReplacementPopup(originalMessage, sentencesToOptimize, optimizedText, isManual);
+    } else {
+      showToast('error', 'AI 未能返回优化后的文本。');
+    }
+  }
+}
+
+async function showReplacementPopup(originalMessage: any, originalSentences: string[], optimizedText: string, isManual: boolean) {
+  const context = getContext();
+  const popupId = 'ai-optimizer-replacement-popup';
+  const popupTitle = '预览并替换';
+  const popupContent = `
+    <div id="${popupId}">
+      <p>AI 返回的优化内容：</p>
+      <textarea id="optimizer-output" class="text_pole" rows="8" readonly>${optimizedText}</textarea>
+    </div>
+  `;
+
+  console.log('[AI Optimizer] Showing replacement popup...');
+  const confirmReplace = await (context as any).callGenericPopup(popupContent, popupTitle, '', {
+    wide: true,
+    okButton: '替换',
+    cancelButton: '取消',
+  });
+
+    if (confirmReplace) {
+        let newFullMessage = originalMessage.message;
+
+        if (isManual) {
+            newFullMessage = optimizedText;
+        } else {
+            originalSentences.forEach((sentence, index) => {
+                if (index === 0) {
+                    newFullMessage = newFullMessage.replace(sentence, optimizedText);
+                } else {
+                    newFullMessage = newFullMessage.replace(sentence, '');
+                }
+            });
+        }
+
+        // 将 \n 替换为 <br> 以便在聊天中正确显示换行
+        const formattedMessage = newFullMessage.trim().replace(/\n/g, '<br>');
+
+        await (window as any).TavernHelper.setChatMessages([{
+            message_id: originalMessage.message_id,
+            message: formattedMessage,
+        }]);
+        showToast('success', '消息已成功替换！');
+    }
+}
+
+async function callOpenAICompatible(messages: any[], options: any): Promise<string | null> {
+    const baseUrl = options.apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+    const apiUrl = `${baseUrl}/v1/chat/completions`;
+    const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            model: options.modelName,
+            messages: messages,
+            max_tokens: options.max_tokens,
+            temperature: options.temperature,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            stream: false
+        })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI-compatible API request failed: ${response.status} - ${errorText}`);
+    }
+    const responseData = await response.json();
+    return responseData?.choices?.[0]?.message?.content ?? null;
+}
+
+async function callOpenAITest(messages: any[], options: any): Promise<string | null> {
+    const response = await fetch('/api/backends/chat-completions/generate', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+            chat_completion_source: 'openai',
+            model: options.modelName,
+            messages: messages,
+            max_tokens: options.max_tokens,
+            temperature: options.temperature,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            reverse_proxy: options.apiUrl,
+            proxy_password: options.apiKey,
+            stream: false
+        })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI (Test) API request failed: ${response.status} - ${errorText}`);
+    }
+    const responseData = await response.json();
+    return responseData?.choices?.[0]?.message?.content ?? null;
+}
+
+// Note: Google adapter functions (convertToGoogleRequest, parseGoogleResponse) would need to be implemented.
+// For now, we'll assume a simplified direct call.
+async function callGoogleDirect(messages: any[], options: any): Promise<string | null> {
+    const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
+    const apiVersion = options.modelName.includes('gemini-1.5') ? 'v1beta' : 'v1';
+    const finalApiUrl = `${GOOGLE_API_BASE_URL}/${apiVersion}/models/${options.modelName}:generateContent?key=${options.apiKey}`;
+    
+    // Simplified request conversion
+    const contents = messages.map(msg => ({ role: msg.role === 'assistant' ? 'model' : 'user', parts: [{ text: msg.content }] }));
+
+    const response = await fetch(finalApiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents, generationConfig: { temperature: options.temperature, maxOutputTokens: options.max_tokens, topP: options.top_p, topK: options.top_k } })
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Google API request failed: ${response.status} - ${errorText}`);
+    }
+    const responseData = await response.json();
+    return responseData?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+}
+
+async function callSillyTavernBackend(messages: any[], options: any): Promise<string | null> {
+    const response = await fetch('/api/backends/chat-completions/generate', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+            chat_completion_source: 'custom',
+            custom_url: options.apiUrl,
+            api_key: options.apiKey,
+            model: options.modelName,
+            messages: messages,
+            max_tokens: options.max_tokens,
+            temperature: options.temperature,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            stream: false
+        })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`SillyTavern Backend API request failed: ${response.status} - ${errorText}`);
+    }
+    const result = await response.json();
+    return result?.choices?.[0]?.message?.content ?? null;
+}
+
+async function callSillyTavernPreset(messages: any[], options: any): Promise<string | null> {
+    const context = getContext() as any;
+    if (!context.ConnectionManagerRequestService) {
+        throw new Error('ConnectionManagerRequestService is not available.');
+    }
+    // This requires finding the profile ID from settings, which is not implemented yet.
+    // For now, we'll throw an error.
+    throw new Error("SillyTavern Preset provider is not fully implemented yet.");
+    // Example of how it could work:
+    // const result = await context.ConnectionManagerRequestService.sendRequest(profileId, messages, options.maxTokens);
+    // return result?.choices?.[0]?.message?.content ?? null;
+}
+
+
+async function callAI(messages: any[], options: any = {}): Promise<string | null> {
+    const settings = getPluginSettings();
+    const finalOptions = {
+        ...settings,
+        ...options,
+    };
+
+    if (finalOptions.apiProvider !== 'sillytavern_preset' && (!finalOptions.apiUrl || !finalOptions.modelName)) {
+        showToast('error', "API URL或模型未配置，无法调用AI。");
+        return null;
+    }
+
+    try {
+        switch (finalOptions.apiProvider) {
+            case 'openai':
+                return await callOpenAICompatible(messages, finalOptions);
+            case 'openai_test':
+                return await callOpenAITest(messages, finalOptions);
+            case 'google':
+                return await callGoogleDirect(messages, finalOptions);
+            case 'sillytavern_backend':
+                return await callSillyTavernBackend(messages, finalOptions);
+            case 'sillytavern_preset':
+                return await callSillyTavernPreset(messages, finalOptions);
+            default:
+                throw new Error(`Unsupported API provider: ${finalOptions.apiProvider}`);
+        }
+    } catch (error: any) {
+        console.error(`API call failed:`, error);
+        showToast('error', `API调用失败: ${error.message}`);
+        return null;
+    }
+}
+
+function getSystemPrompt(): string {
+  const settings = getPluginSettings();
+  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  const { main, system, final_system } = settings.promptSettings;
+
+  return [
+    main,
+    system,
+    `必须避免使用这些词：[${disabledWords.join(', ')}]`,
+    final_system,
+  ].filter(Boolean).join('\n');
+}
+
+async function getOptimizedText(textToOptimize: string): Promise<string> {
+  const systemPrompt = getSystemPrompt();
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: `待优化句子：\n${textToOptimize}` },
+  ];
+  
+  const result = await callAI(messages);
+
+  return result ?? '';
+}
+
+/**
+ * 从文本中提取包含指定单词的句子。
+ * @param text 全文。
+ * @param words 要查找的单词数组。
+ */
+function extractSentencesWithWords(text: string, words: string[]): string[] {
+    // 改进的正则表达式，能更好地处理中英文标点，并在找不到标点时将整个文本视为一个句子。
+    const sentences = text.match(/[^.!?。！？]+[.!?。！？]?/g) || [text];
+    const uniqueSentences = new Set<string>();
+
+    words.forEach(word => {
+        // 创建一个对特殊字符进行转义的正则表达式
+        const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const regex = new RegExp(escapedWord, 'i');
+        sentences.forEach(sentence => {
+            if (regex.test(sentence)) {
+                // 先 trim，再移除特定的前缀，如 '*' 或 '-->'
+                const cleanedSentence = sentence.trim().replace(/^\s*([*]|-->)\s*/, '');
+                uniqueSentences.add(cleanedSentence);
+            }
+        });
+    });
+
+    return Array.from(uniqueSentences);
+}
+
+
+// Helper to get request headers for SillyTavern API
+const getRequestHeaders = () => {
+    const context = getContext() as any;
+    return {
+        'X-CSRF-Token': context.token,
+        'Content-Type': 'application/json',
+    };
+};
+
+async function fetchOpenAICompatibleModels(apiUrl: string, apiKey: string): Promise<string[]> {
+    if (!apiUrl || !apiKey) {
+        throw new Error("OpenAI兼容模式需要API URL和API Key");
+    }
+    const baseUrl = apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+    const modelsUrl = `${baseUrl}/v1/models`;
+    const response = await fetch(modelsUrl, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    const data = await response.json();
+    const models = data.data || data.models || [];
+    return models.map((m: any) => m.id || m.model).filter(Boolean).sort();
+}
+
+async function fetchOpenAITestModels(apiUrl: string, apiKey: string): Promise<string[]> {
+    const response = await fetch('/api/backends/chat-completions/status', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+            reverse_proxy: apiUrl,
+            proxy_password: apiKey,
+            chat_completion_source: 'openai'
+        })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    const rawData = await response.json();
+    const models = Array.isArray(rawData) ? rawData : (rawData.data || rawData.models || []);
+    if (!Array.isArray(models)) {
+        throw new Error('API未返回有效的模型列表数组');
+    }
+    return models.map((m: any) => m.name ? m.name.replace('models/', '') : (m.id || m.model || m)).filter(Boolean).sort();
+}
+
+async function fetchGoogleDirectModels(apiKey: string): Promise<string[]> {
+    if (!apiKey) {
+        throw new Error("Google直连模式需要API Key");
+    }
+    const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
+    const fetchGoogleModels = async (version: string) => {
+        const url = `${GOOGLE_API_BASE_URL}/${version}/models?key=${apiKey}`;
+        const response = await fetch(url);
+        if (!response.ok) return [];
+        const json = await response.json();
+        if (!json.models || !Array.isArray(json.models)) return [];
+        return json.models
+            .filter((model: any) => model.supportedGenerationMethods?.includes('generateContent'))
+            .map((model: any) => model.name.replace('models/', ''));
+    };
+    const [v1Models, v1betaModels] = await Promise.all([fetchGoogleModels('v1'), fetchGoogleModels('v1beta')]);
+    return [...new Set([...v1Models, ...v1betaModels])].sort();
+}
+
+async function fetchSillyTavernBackendModels(apiUrl: string, apiKey: string): Promise<string[]> {
+    if (!apiUrl) {
+        throw new Error("SillyTavern后端模式需要API URL");
+    }
+    const response = await fetch('/api/backends/chat-completions/status', {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({
+            chat_completion_source: 'custom',
+            custom_url: apiUrl,
+            api_key: apiKey
+        })
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    const result = await response.json();
+    const models = result.data || [];
+    if (result.error || !Array.isArray(models)) {
+        const errorMessage = result.error?.message || 'API未返回有效的模型列表数组';
+        throw new Error(errorMessage);
+    }
+    return models.map((model: any) => model.id || model.model).filter(Boolean).sort();
+}
+
+async function fetchSillyTavernPresetModels(): Promise<string[]> {
+    const context = getContext() as any;
+    if (!context) throw new Error("无法获取SillyTavern上下文");
+    const defaultModels = ['gpt-3.5-turbo', 'gpt-4', 'claude-3-sonnet', 'claude-3-haiku', 'gemini-pro'];
+    const currentModel = context.chat_completion_source;
+    const models = currentModel ? [currentModel] : [];
+    return [...new Set([...models, ...defaultModels])].sort();
+}
+
+export async function fetchModelsFromApi(): Promise<string[]> {
+    const settings = getPluginSettings();
+    try {
+        switch (settings.apiProvider) {
+            case 'openai':
+                return await fetchOpenAICompatibleModels(settings.apiUrl, settings.apiKey);
+            case 'openai_test':
+                return await fetchOpenAITestModels(settings.apiUrl, settings.apiKey);
+            case 'google':
+                return await fetchGoogleDirectModels(settings.apiKey);
+            case 'sillytavern_backend':
+                return await fetchSillyTavernBackendModels(settings.apiUrl, settings.apiKey);
+            case 'sillytavern_preset':
+                return await fetchSillyTavernPresetModels();
+            default:
+                throw new Error(`未支持的API提供商: ${settings.apiProvider}`);
+        }
+    } catch (error: any) {
+        console.error('获取模型列表失败:', error);
+        showToast('error', `获取模型列表失败: ${error.message}`, "任务失败");
+        return [];
+    }
+}
+
+export async function testApiConnection(): Promise<boolean> {
+    const models = await fetchModelsFromApi();
+    return models.length > 0;
+}
+
+/**
+ * 手动触发，提取最后一条角色消息中包含禁用词的句子。
+ * @param callback 一个回调函数，用于接收提取出的内容。
+ */
+export function manualOptimize(callback: (content: string) => void) {
+  console.log('[AI Optimizer] Manual optimize triggered.');
+
+  const context = getContext();
+  const chat = context.chat;
+  const settings = getPluginSettings();
+
+  if (!chat || chat.length === 0) {
+    showToast('error', '聊天记录为空，无法优化。');
+    console.error('[AI Optimizer] Chat is empty.');
+    callback('');
+    return;
+  }
+
+  // 从后往前遍历，找到最后一条 AI 消息 (角色消息)
+  let lastCharMessage = null;
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (!chat[i].is_user) {
+      lastCharMessage = chat[i];
+      break;
+    }
+  }
+
+  if (!lastCharMessage) {
+    showToast('error', '未找到角色生成的消息。');
+    console.error('[AI Optimizer] No character message found in chat history.');
+    callback('');
+    return;
+  }
+
+  console.log(`[AI Optimizer] Found last character message with ID: ${lastCharMessage.mes_id}`);
+  const messageText = lastCharMessage.mes;
+
+  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  if (disabledWords.length === 0) {
+    showToast('warning', '未设置禁用词，无法提取。');
+    callback('');
+    return;
+  }
+
+  const sentences = extractSentencesWithWords(messageText, disabledWords);
+
+  if (sentences.length > 0) {
+    showToast('success', '已提取待优化内容。');
+    const numberedSentences = sentences.map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
+    callback(numberedSentences);
+  } else {
+    // 在 Panel.vue 中处理此情况的UI反馈
+    // (toastr as any).info('在最后一条角色消息中未找到包含禁用词的句子。');
+    callback('');
+  }
+}
+
+/**
+ * 将指定的文本和提示词发送给AI进行优化。
+ * @param textToOptimize 要优化的文本。
+ * @param prompt 使用的系统提示词。
+ * @returns 优化后的文本。
+ */
+export async function optimizeText(textToOptimize: string, prompt: string): Promise<string> {
+  const messages = [
+    { role: 'system', content: prompt },
+    { role: 'user', content: textToOptimize },
+  ];
+
+  console.log('--- Sending to AI for Optimization ---');
+  console.log('Prompt:', prompt);
+  console.log('Text to optimize:', textToOptimize);
+  console.log('------------------------------------');
+
+  const result = await callAI(messages);
+
+  console.log('处理完成');
+
+  return result ?? '';
+}
+
+/**
+ * 替换最后一条角色消息中的句子。
+ * @param originalContent 包含原始句子的文本块。
+ * @param optimizedContent 包含优化后句子的文本块。
+ * @param callback 更新UI的回调函数。
+ */
+/**
+ * 内部函数，用于替换消息内容。
+ * @param lastCharMessage 要修改的消息对象。
+ * @param originalContent 原始句子内容。
+ * @param optimizedContent 优化后的句子内容。
+ */
+async function replaceMessageInternal(lastCharMessage: any, originalContent: string, optimizedContent: string) {
+  const context = getContext();
+  const originalSentences = originalContent.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
+    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
+
+  if (originalSentences.length === 0) {
+    console.warn('[AI Optimizer] No original sentences to replace.');
+    return;
+  }
+  
+  // 如果AI返回的句子数量与原始句子数量不匹配，则将所有原始句子替换为完整的优化后内容
+  let modifiedMessage = lastCharMessage.mes;
+  if (originalSentences.length !== optimizedSentences.length) {
+      console.warn('[AI Optimizer] Mismatch in sentence count. Replacing the whole block.');
+      // 找到第一个原始句子并替换整个块
+      const firstSentence = originalSentences[0];
+      modifiedMessage = modifiedMessage.replace(firstSentence, optimizedContent);
+      // 移除剩余的原始句子
+      for (let i = 1; i < originalSentences.length; i++) {
+          modifiedMessage = modifiedMessage.replace(originalSentences[i], '');
+      }
+  } else {
+      originalSentences.forEach((original, index) => {
+          const optimized = optimizedSentences[index];
+          const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+          modifiedMessage = modifiedMessage.replace(regex, optimized);
+      });
+  }
+
+  const tempVarName = `__optimizer_swipe_text_${Date.now()}`;
+  const formattedMessage = modifiedMessage.replace(/\n/g, '<br>');
+  const safeMessageForSetvar = JSON.stringify(formattedMessage);
+
+  const commandChain = [
+    `/setvar key=${tempVarName} ${safeMessageForSetvar}`,
+    `/addswipe switch=true {{getvar::${tempVarName}}}`,
+    `/flushvar ${tempVarName}`
+  ].join(' | ');
+
+  try {
+    await context.executeSlashCommands(commandChain);
+    console.log('[AI Optimizer] Executed addswipe command chain for auto-optimization.');
+  } catch (error) {
+    console.error('[AI Optimizer] Error executing addswipe command chain:', error);
+    throw new Error('通过斜杠命令添加新消息版本时出错。');
+  }
+}
+
+export function replaceMessage(
+  originalContent: string,
+  optimizedContent: string,
+  callback: (newContent: string) => void,
+) {
+  console.log('[AI Optimizer] Starting message replacement.');
+
+  const context = getContext();
+  const chat = context.chat;
+
+  if (!chat || chat.length === 0) {
+    showToast('error', '聊天记录为空，无法替换。');
+    return;
+  }
+
+  // 找到最后一条角色消息
+  let lastCharMessage = null;
+  for (let i = chat.length - 1; i >= 0; i--) {
+    if (!chat[i].is_user) {
+      lastCharMessage = chat[i];
+      break;
+    }
+  }
+
+  if (!lastCharMessage) {
+    showToast('error', '未找到可替换的角色消息。');
+    return;
+  }
+
+  const originalSentences = originalContent.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
+    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
+
+  if (originalSentences.length !== optimizedSentences.length) {
+    console.warn('[AI Optimizer] Mismatch in sentence count. Will attempt block replacement.');
+  }
+
+  let modifiedMessage = lastCharMessage.mes;
+
+  originalSentences.forEach((original, index) => {
+    const optimized = optimizedSentences[index];
+    if (optimized) {
+      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+      modifiedMessage = modifiedMessage.replace(regex, optimized);
+    }
+  });
+
+  // 更新测试文本框
+  callback(modifiedMessage);
+
+  // 执行替换
+  (async () => {
+    await replaceMessageInternal(lastCharMessage, originalContent, optimizedContent);
+    showToast('success', '已添加优化后的消息版本！');
+  })();
+}
+
+/**
+ * 获取并解析 {{lastcharmessage}} 宏。
+ * @returns 解析后的最后一条角色消息内容。
+ */
+export function getLastCharMessage(): string {
+  try {
+    const context = getContext() as any;
+    if (context.utility && typeof context.utility.substitudeMacros === 'function') {
+      // 尝试使用 context.utility 中的函数
+      return context.utility.substitudeMacros('{{lastcharmessage}}');
+    } 
+    // 作为备用方案，手动查找最后一条消息
+    const chat = context.chat;
+    if (!chat || chat.length === 0) {
+      return '';
+    }
+    for (let i = chat.length - 1; i >= 0; i--) {
+      if (!chat[i].is_user) {
+        return chat[i].mes;
+      }
+    }
+    return '';
+  } catch (error) {
+    console.error('[AI Optimizer] Error getting last char message:', error);
+    return '';
+  }
+}

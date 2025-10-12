@@ -1,0 +1,145 @@
+# 酒馆助手脚本开发笔记
+
+## 《SillyTavern 脚本命令自查手册.docx》阅读笔记
+
+### 监听AI回复结束的方法
+- **关键发现**: 可以使用快速回复（Quick Reply, QR）的 `bot` 参数。
+- **命令**: `/qr-create [bot=true] ... (commands)`
+- **说明**: 当设置 `bot=true` 时，该快速回复脚本会在AI发送消息后自动执行。这是实现“AI回复完毕后自动运行”功能的核心。
+
+### 获取AI回复内容
+- **命令**: `/messages`
+  - 示例: `/messages {{lastMessageId}}` 获取最后一条消息。
+- **宏**:
+  - `{{lastMessage}}`: 获取最后一条消息的文本。
+  - `{{lastCharMessage}}`: 获取最后一个角色（通常是AI）消息的文本。
+
+### UI交互（弹窗、按钮、输入框）
+- `/popup [text]`: 创建一个简单的文本弹窗。
+- `/input [prompt] [onSuccess=closure]`: 创建一个带输入框的弹窗，`onSuccess` 闭包可以在用户点击确认后执行操作。这可以用于显示提取的句子并让用户编辑。
+- `/buttons labels=["label1", "label2"] [text]`: 创建带自定义按钮的弹窗。可以用于“优化”和“替换”按钮。
+- `/echo [text]`: 显示一个非阻塞的 `Toast` 通知。
+
+### 文本操作
+- `/replace [pattern=string] [replacer=string] (text)`: 替换字符串中的文本。用于将优化后的句子替换回原文。
+- `/match [pattern=string] (text)`: 使用正则表达式查找匹配项。可以用来查找所有包含禁用词的句子。
+- `/test [pattern=string] (text)`: 测试文本是否匹配正则表达式。可以用来判断一句话是否包含禁用词。
+
+### 变量和设置存储
+- **局部变量 (当前聊天)**:
+  - `/setvar key=varName value`: 设置变量。
+  - `/getvar key=varName` 或 `{{getvar::varName}}`: 获取变量。
+- **全局变量 (所有聊天)**:
+  - `/setglobalvar key=varName value`: 设置全局变量。
+  - `/getglobalvar key=varName` 或 `{{getglobalvar::varName}}`: 获取全局变量。
+- **用途**: 可以用全局变量来存储用户设置，如自定义URL、API密钥、禁用词列表。
+
+### 与LLM交互
+- `/genraw [prompt]`: 发送原始提示到LLM，不包含角色卡等额外信息。这对于调用外部API进行文本优化非常有用。
+- `/ask [name=charName] [prompt]`: 以特定角色的身份提问。
+
+### 其他有用命令
+- `/inject`: 动态注入提示词，可以用于“提示词编写器”。
+- `/extension-enable` / `/extension-disable`: 启用/禁用扩展，可以实现“启用/关闭插件”按钮的功能（虽然我们现在做的是脚本，但可以借鉴这个思路来控制脚本的启用/禁用状态）。
+- `{{pipe}}`: 在命令链中传递上一个命令的输出。
+
+## `ST-Amily2-Chat-Optimisation/index.js` 分析笔记
+
+### 监听AI回复结束的方法 (更高级的方式)
+- **关键发现**: 除了QR的`bot`参数，还可以通过 `eventSource` API 以编程方式监听事件。
+- **代码**: `eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);`
+- **说明**: `event_types.MESSAGE_RECEIVED` 事件在接收到新消息（包括AI的回复）时触发。`onMessageReceived` 是一个回调函数，可以在其中编写处理逻辑。这比使用斜杠命令更加灵活和强大。
+
+### API 调用和处理
+- **文件**: API 逻辑主要封装在 `core/api.js` 中。
+- **配置**: API 的 URL 和密钥等配置信息直接从 `extension_settings` 中读取。
+- **实现**: `processPlotOptimization` 函数似乎是实际执行LLM调用以进行优化的核心函数。
+
+### 设置管理
+- **存储**: 使用 `extension_settings[extensionName]` 对象来存储插件的所有设置。
+- **默认值**: 在插件加载时，会检查并合并 `defaultSettings`，确保所有设置都有初始值。
+- **保存**: 使用 `saveSettingsDebounced()` 函数来保存设置，这可以防止频繁写入。
+
+### UI 和 DOM 操作
+- **技术栈**: 大量使用 jQuery (`$`) 进行DOM操作。
+- **动态加载**: 动态创建 `<link>` 标签来加载CSS，动态创建HTML元素来构建UI。
+- **通知**: 使用 `toastr.js` 库来显示用户通知。
+
+### 项目结构
+- 项目被清晰地划分为多个模块/目录：
+  - `core/`: 核心逻辑，如事件处理、API调用。
+  - `ui/`: 用户界面相关的代码，如创建抽屉、绑定事件。
+  - `utils/`: 工具函数和常量，如设置管理。
+- 这种模块化的结构值得在我们的脚本开发中借鉴。
+
+## `ST-Amily2-Chat-Optimisation/core/api.js` 分析笔记
+
+### 统一的 API 调用封装
+- **核心函数**: `callAI(messages, options = {})` 是所有对大语言模型请求的统一入口点。
+- **分发机制**: 该函数内部使用 `switch` 语句，根据用户在设置中选择的 `apiProvider`（如 'openai', 'google', 'sillytavern_backend'），将请求分发给对应的具体实现函数（如 `callOpenAICompatible`, `callGoogleDirect` 等）。
+- **启示**: 我们可以借鉴这种模式，创建一个中心化的函数来处理对外部优化API的调用。
+
+### 动态获取模型列表
+- **核心函数**: `fetchModels()` 负责从指定的API端点获取可用的模型列表。
+- **实现**: 与 `callAI` 类似，它也根据 `apiProvider` 调用不同的函数来获取模型。
+- **用户体验**: 该函数还包含了更新UI（如禁用按钮、显示加载动画）的逻辑，值得学习。
+
+### API 设置管理
+- **获取设置**: `getApiSettings()` 函数直接从jQuery选择的UI元素（如输入框、下拉菜单）中获取用户配置的URL、密钥、模型等信息。
+- **流程**: 这清晰地展示了 "UI收集输入 -> 脚本读取输入 -> API模块使用输入" 的标准流程。
+
+### 对多种后端的支持
+- **OpenAI 兼容**: `callOpenAICompatible` 函数提供了连接任何遵循OpenAI API格式的后端的方法。这对我们的脚本非常有价值，因为它具有广泛的兼容性。
+- **SillyTavern 集成**: `callSillyTavernPreset` 函数展示了如何通过SillyTavern自身的连接管理器和配置文件来发送请求，这是一种更深度、更原生的集成方式。
+
+### 健壮的错误处理
+- `callAI` 函数中的 `try...catch` 块对不同类型的HTTP错误（401, 403, 429, 500等）进行了分类处理，并向用户显示了明确的错误提示。这是一个非常好的实践。
+
+## `ST-Amily2-Chat-Optimisation/core/events.js` 分析笔记
+
+### `onMessageReceived` 函数是核心
+- **触发时机**: 这个函数在 `event_types.MESSAGE_RECEIVED` 事件触发时执行，即每次有新消息（包括AI回复）时。
+- **核心逻辑**:
+    1.  通过 `getContext()` 获取上下文。
+    2.  从 `context.chat` 中获取最后一条消息 `latestMessage`。
+    3.  检查 `latestMessage.is_user`，确保只处理AI的回复。
+    4.  调用 `processOptimization` 函数对AI的回复进行处理。
+    5.  如果处理后内容有变，直接修改 `latestMessage.mes` 并调用 `saveChatConditional()` 保存。
+
+### 对我们脚本的实现思路
+- **功能植入点**: `onMessageReceived` 函数是实现我们所有“AI回复后”逻辑的最佳位置。
+- **高亮禁用词实现**:
+    1.  在 `onMessageReceived` 的开头，获取 `latestMessage.mes`。
+    2.  从全局设置中读取禁用词列表。
+    3.  遍历禁用词，使用正则表达式和 `/replace` 命令，将消息中的禁用词用带有高亮样式的 `<span>` 标签包裹起来。
+    4.  更新 `latestMessage.mes` 并保存。
+- **自动弹窗优化实现**:
+    1.  在高亮处理之后，检查消息中是否真的存在高亮标签（即是否包含禁用词）。
+    2.  如果存在，调用 `/input` 或 `/buttons` 弹出对话框。
+    3.  **提取句子**: 使用正则表达式从 `latestMessage.mes` 中提取出包含禁用词的完整句子，并将其放入弹窗的输入框中。
+    4.  **“优化”按钮**: 绑定一个闭包到“优化”按钮。这个闭包会：
+        a.  获取输入框中的文本。
+        b.  调用我们自己封装的 `callAI` 函数，将文本发送到用户指定的优化API。
+    5.  **“替换”按钮**: 在 `callAI` 的回调中，再弹出一个新窗口显示优化后的文本，并提供一个“替换”按钮。这个按钮的闭包会：
+        a.  使用 `/replace` 命令，将 `latestMessage.mes` 中的原始句子替换为优化后的句子。
+        b.  调用 `saveChatConditional()` 保存聊天记录。
+        c.  关闭弹窗。
+
+## `@types` (TavernHelper API) 分析笔记
+
+### `window.TavernHelper` 对象
+- **关键发现**: SillyTavern 在 `window` 对象上暴露了一个名为 `TavernHelper` 的全局对象，提供了丰富的JS API，作为斜杠命令的编程替代方案。
+- **优势**: 相比于拼接字符串来调用 `/triggerSlash`，直接使用 `TavernHelper` 的函数（如 `TavernHelper.getChatMessages()`）更清晰、类型更安全、功能更强大。
+
+### 核心API函数
+- **命令执行**: `triggerSlash(command: string): Promise<any>` - 可以执行任何斜杠命令，是最后的“万能钥匙”。
+- **消息操作**:
+  - `getChatMessages(spec)`: 获取消息对象数组。
+  - `setChatMessages(messages, spec)`: 直接替换消息对象，比 `/replace` 更精确。
+- **生成调用**: `generate(prompt, options)` 和 `generateRaw(prompt, options)` - 分别对应 `/gen` 和 `/genraw`。
+- **工具函数**: `getLastMessageId()` - 直接获取最后一条消息的ID。
+
+### 对我们脚本的实现思路
+- **优先使用JS API**: 在编写脚本时，应优先使用 `TavernHelper` 提供的JS函数。
+- **精确修改**: 使用 `getChatMessages` 获取到消息对象，在JS中修改其 `.mes` 属性（例如，添加高亮 `<span>`），然后用 `setChatMessages` 将其写回，这样可以避免复杂的字符串替换操作。
+- **混合使用**: 对于没有直接JS API的简单UI操作（如 `/popup`），仍然可以使用 `TavernHelper.triggerSlash()` 来快速实现。

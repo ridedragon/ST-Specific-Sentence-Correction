@@ -1,0 +1,16 @@
+{
+  "display_name": "AI 文本优化助手",
+  "loading_order": 150,
+  "requires": [],
+  "optional": [],
+  "js": "dist/index.js",
+  "css": "dist/index.css",
+  "author": "Cline",
+  "version": "1.0.0",
+  "homePage": "",
+  "auto_update": true,
+  "i18n": {
+    "en": "i18n/en.json",
+    "zh-CN": "i18n/zh-CN.json"
+  }
+}
