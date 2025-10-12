@@ -453,8 +453,27 @@ function extractSentencesWithWords(text: string, words: string[]): string[] {
         const regex = new RegExp(escapedWord, 'i');
         sentences.forEach(sentence => {
             if (regex.test(sentence)) {
-                // 先 trim，再移除特定的前缀，如 '*' 或 '-->'
-                const cleanedSentence = sentence.trim().replace(/^\s*([*]|-->)\s*/, '');
+                // 移除换行符
+                let cleanedSentence = sentence.replace(/[\r\n]/g, ' ').trim();
+                
+                // 移除所有星号
+                cleanedSentence = cleanedSentence.replace(/\*/g, '');
+
+                // 移除句子开头和结尾的引号和空格
+                cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
+
+                // 如果句子中包含 "……"，则只取最后一个 "……" 之后的部分
+                const ellipsisIndex = cleanedSentence.lastIndexOf('……');
+                if (ellipsisIndex !== -1) {
+                    // 确保 "……" 后面有内容
+                    if (ellipsisIndex + 2 < cleanedSentence.length) {
+                        cleanedSentence = cleanedSentence.substring(ellipsisIndex + 2);
+                    }
+                }
+                
+                // 再次移除可能出现的前导引号
+                cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+/, '').trim();
+
                 uniqueSentences.add(cleanedSentence);
             }
         });
