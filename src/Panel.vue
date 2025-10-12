@@ -8,17 +8,17 @@
       <div class="inline-drawer-content">
         <!-- 生成设置 -->
         <b>{{ t`生成设置` }}</b>
-        <div class="slider-block block">
+        <div class="block">
           <label>{{ t`Temperature` }} ({{ settings.temperature }})</label>
-          <input v-model.number="settings.temperature" type="range" min="0" max="2" step="0.01" class="slider" />
+          <CustomSlider v-model="settings.temperature" :min="0" :max="2" :step="0.01" />
         </div>
         <div class="block">
           <label>{{ t`Max Tokens` }}</label>
           <input v-model.number="settings.max_tokens" class="text_pole" type="number" />
         </div>
-        <div class="slider-block block">
+        <div class="block">
           <label>{{ t`Top P` }} ({{ settings.top_p }})</label>
-          <input v-model.number="settings.top_p" type="range" min="0" max="1" step="0.01" class="slider" />
+          <CustomSlider v-model="settings.top_p" :min="0" :max="1" :step="0.01" />
         </div>
         <div class="block">
           <label>{{ t`Top K` }}</label>
@@ -131,6 +131,7 @@
 
 <script setup lang="ts">
 // Cache-busting comment
+import CustomSlider from '@/components/CustomSlider.vue';
 import { useSettingsStore } from '@/store/settings';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
@@ -342,65 +343,5 @@ onUnmounted(() => {
 }
 .menu_button {
   white-space: nowrap;
-}
-
-.slider-block {
-  position: relative;
-  padding-bottom: 10px; /* 为滑块留出空间，防止遮挡下方内容 */
-}
-
-/* 优化滑动条样式，确保在移动设备上正常显示 */
-.slider {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 8px;
-  background: #ddd;
-  outline: none;
-  opacity: 0.7;
-  -webkit-transition: .2s;
-  transition: opacity .2s;
-  border-radius: 4px;
-}
-
-.slider:hover {
-  opacity: 1;
-}
-
-.slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  background: #4CAF50;
-  cursor: pointer;
-  border-radius: 50%;
-  margin-top: -5px; /* (轨道高度 - 滑块高度) / 2 = (8px - 18px) / 2 = -5px */
-}
-
-.slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  background: #4CAF50;
-  cursor: pointer;
-  border-radius: 50%;
-}
-
-/* 针对移动设备进行微调 */
-@media (max-width: 768px) {
-  .slider {
-    height: 6px; /* 减小轨道厚度 */
-  }
-
-  .slider::-webkit-slider-thumb {
-    width: 18px; /* 减小滑块尺寸 */
-    height: 18px;
-    margin-top: -6px; /* (轨道高度 - 滑块高度) / 2 = (6px - 18px) / 2 = -6px */
-  }
-
-  .slider::-moz-range-thumb {
-    width: 18px; /* 减小滑块尺寸 */
-    height: 18px;
-  }
 }
 </style>
