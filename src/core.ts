@@ -110,6 +110,10 @@ async function onGenerationEnded(messageId: number) {
 
       showToast('success', '句子提取成功，正在发送给AI优化...');
       const optimizedResultText = await getOptimizedText(sourceContent);
+      if (optimizedResultText === null) {
+        // Optimization was aborted or failed, message already shown.
+        return;
+      }
       if (!optimizedResultText) {
         throw new Error('AI 未能返回优化后的文本。');
       }
@@ -429,6 +433,11 @@ async function callAI(messages: any[], options: any = {}): Promise<string | null
                 throw new Error(`Unsupported API provider: ${finalOptions.apiProvider}`);
         }
     } catch (error: any) {
+        if (error.name === 'AbortError') {
+            // The abortOptimization function already shows an info toast.
+            console.log('API call was aborted by the user.');
+            return null;
+        }
         console.error(`API call failed:`, error);
         showToast('error', `API调用失败: ${error.message}`);
         return null;
@@ -448,7 +457,7 @@ function getSystemPrompt(): string {
   ].filter(Boolean).join('\n');
 }
 
-async function getOptimizedText(textToOptimize: string): Promise<string> {
+async function getOptimizedText(textToOptimize: string): Promise<string | null> {
   const systemPrompt = getSystemPrompt();
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -457,7 +466,7 @@ async function getOptimizedText(textToOptimize: string): Promise<string> {
   
   const result = await callAI(messages);
 
-  return result ?? '';
+  return result;
 }
 
 /**
@@ -756,7 +765,7 @@ function cleanTextWithRegex(text: string): string {
  * @param prompt 使用的系统提示词。
  * @returns 优化后的文本。
  */
-export async function optimizeText(textToOptimize: string, prompt: string): Promise<string> {
+export async function optimizeText(textToOptimize: string, prompt: string): Promise<string | null> {
   const messages = [
     { role: 'system', content: prompt },
     { role: 'user', content: textToOptimize },
@@ -771,7 +780,7 @@ export async function optimizeText(textToOptimize: string, prompt: string): Prom
 
   console.log('处理完成');
 
-  return result ?? '';
+  return result;
 }
 
 /**

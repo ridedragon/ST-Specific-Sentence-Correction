@@ -207,8 +207,11 @@ const handleOptimize = async () => {
   (toastr as any).info('正在发送给AI进行优化...');
   try {
     const result = await optimizeText(optimizedContent.value, settings.value.promptSettings[activePrompt.value]);
-    optimizedResult.value = result;
-    (toastr as any).success('优化完成。');
+    if (result !== null) {
+      optimizedResult.value = result;
+      (toastr as any).success('优化完成。');
+    }
+    // If result is null, it means the operation was aborted, and a toast is already shown in core.ts
   } catch (error) {
     console.error(error);
     (toastr as any).error('优化失败，请查看控制台日志。');
@@ -267,6 +270,13 @@ const handleFullAutoOptimize = async () => {
 
     // 步骤 2: 发送给AI进行优化
     const optimizedResultText = await optimizeText(sourceContent, settings.value.promptSettings[activePrompt.value]);
+    
+    // 如果用户取消了优化，则中止整个流程
+    if (optimizedResultText === null) {
+      console.log('[Auto Optimizer] 优化被用户取消，流程中止。');
+      return;
+    }
+    
     if (!optimizedResultText) {
       throw new Error('AI 未能返回优化后的文本。');
     }
@@ -283,6 +293,7 @@ const handleFullAutoOptimize = async () => {
     (toastr as any).success('替换完成！流程结束。', '成功', { timeOut: 5000 });
 
   } catch (error: any) {
+    // AbortError should be caught in callAI, so we only handle other errors here.
     console.error('[Auto Optimizer] 流程执行出错:', error);
     (toastr as any).error(error.message, '自动化流程失败', { timeOut: 10000 });
   }
