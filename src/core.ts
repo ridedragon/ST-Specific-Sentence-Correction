@@ -671,20 +671,32 @@ function cleanTextWithRegex(text: string): string {
     return text;
   }
 
-  const regexPatterns = regexFilters
+  const regexLines = regexFilters
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.length > 0);
 
   let cleanedText = text;
-  for (const pattern of regexPatterns) {
+
+  for (const line of regexLines) {
     try {
-      // 假设用户输入的都是有效的正则表达式字符串
-      const regex = new RegExp(pattern, 'gs');
+      let pattern = line;
+      let flags = 'gs'; // 默认标志
+
+      // 检查是否为 /pattern/flags 格式
+      const match = line.match(/^\/(.*)\/([gimsuy]*)$/);
+      if (match) {
+        pattern = match[1];
+        // 如果用户提供了标志，则使用用户的；否则，保留我们的默认值
+        flags = match[2] !== '' ? match[2] : flags;
+      }
+      
+      const regex = new RegExp(pattern, flags);
       cleanedText = cleanedText.replace(regex, '');
+
     } catch (error) {
-      console.error(`[AI Optimizer] 无效的正则表达式: "${pattern}"`, error);
-      // 如果某个表达式无效，可以选择跳过它
+      console.error(`[AI Optimizer] 无效的正则表达式: "${line}"`, error);
+      // 如果某个表达式无效，则跳过它
     }
   }
 

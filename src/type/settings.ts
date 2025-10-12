@@ -14,6 +14,7 @@ export const Settings = z
         '<StatusPlaceHolderImpl\\/>',
         '\\s*<!--[\\s\\S]*?-->\\s*',
         '(<disclaimer>.*?<\\/disclaimer>)|(<guifan>.*?<\\/guifan>)|```start|<content>|<\\/content>|```end|<done>|`<done>`|(<!--\\s*consider\\s*:\\s*(.*?)\\s*-->)|(.*?<\\/think(ing)?>(\\n)?)|(<think(ing)?>[\\s\\S]*?<\\/think(ing)?>(\\n)?)',
+        '/<UpdateVariable>[\\s\\S]*?<\\/UpdateVariable>/gm',
       ].join('\n')
     ),
     disableNotifications: z.boolean().default(false),
