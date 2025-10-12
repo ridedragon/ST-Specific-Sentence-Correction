@@ -8,7 +8,7 @@
       <div class="inline-drawer-content">
         <!-- 生成设置 -->
         <b>{{ t`生成设置` }}</b>
-        <div class="block">
+        <div class="slider-block block">
           <label>{{ t`Temperature` }} ({{ settings.temperature }})</label>
           <input v-model.number="settings.temperature" type="range" min="0" max="2" step="0.01" class="slider" />
         </div>
@@ -16,7 +16,7 @@
           <label>{{ t`Max Tokens` }}</label>
           <input v-model.number="settings.max_tokens" class="text_pole" type="number" />
         </div>
-        <div class="block">
+        <div class="slider-block block">
           <label>{{ t`Top P` }} ({{ settings.top_p }})</label>
           <input v-model.number="settings.top_p" type="range" min="0" max="1" step="0.01" class="slider" />
         </div>
@@ -344,8 +344,13 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.slider-block {
+  position: relative;
+}
+
 /* 优化滑动条样式，确保在移动设备上正常显示 */
 .slider {
+  position: relative; /* 确保滑块的定位上下文正确 */
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
