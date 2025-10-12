@@ -96,12 +96,16 @@
             {{ t`关闭大部分通知` }}
           </label>
         </div>
+        <div class="button-group">
+          <button class="menu_button" @click="handleExtractSentences">{{ t`提取待修改句子` }}</button>
+        </div>
         <div class="block">
           <label>{{ t`待优化内容` }}</label>
           <textarea v-model="optimizedContent" class="text_pole" rows="4"></textarea>
         </div>
         <div class="button-group">
           <button class="menu_button" @click="handleOptimize">{{ t`优化` }}</button>
+          <button class="menu_button" @click="handleStopOptimize">{{ t`停止优化` }}</button>
         </div>
         <div class="block">
           <label>{{ t`优化后内容` }}</label>
@@ -139,7 +143,7 @@ import CustomSlider from '@/components/CustomSlider.vue';
 import { useSettingsStore } from '@/store/settings';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, checkMessageForDisabledWords } from '@/core';
+import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, checkMessageForDisabledWords, abortOptimization } from '@/core';
 
 const { settings } = storeToRefs(useSettingsStore());
 const modelList = ref<string[]>([]);
@@ -178,6 +182,21 @@ const handleReplaceMessage = () => {
       modifiedMessage.value = newContent;
     },
   );
+};
+
+const handleExtractSentences = () => {
+  manualOptimize((content: string) => {
+    optimizedContent.value = content;
+    if (content) {
+      (toastr as any).success('已提取待优化内容。');
+    } else {
+      (toastr as any).info('在最后一条角色消息中未找到包含禁用词的句子。');
+    }
+  });
+};
+
+const handleStopOptimize = () => {
+  abortOptimization();
 };
 
 const handleOptimize = async () => {

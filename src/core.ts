@@ -266,11 +266,25 @@ async function showReplacementPopup(originalMessage: any, originalSentences: str
     }
 }
 
+let currentRequestController: AbortController | null = null;
+
+export function abortOptimization() {
+  if (currentRequestController) {
+    currentRequestController.abort();
+    currentRequestController = null;
+    console.log('[AI Optimizer] API request aborted.');
+    showToast('info', '优化请求已取消。');
+  }
+}
+
 async function callOpenAICompatible(messages: any[], options: any): Promise<string | null> {
     const baseUrl = options.apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
     const apiUrl = `${baseUrl}/v1/chat/completions`;
+    currentRequestController = new AbortController();
+    const signal = currentRequestController.signal;
     const response = await fetch(apiUrl, {
         method: 'POST',
+        signal,
         headers: { 'Authorization': `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
             model: options.modelName,
@@ -291,9 +305,12 @@ async function callOpenAICompatible(messages: any[], options: any): Promise<stri
 }
 
 async function callOpenAITest(messages: any[], options: any): Promise<string | null> {
+    currentRequestController = new AbortController();
+    const signal = currentRequestController.signal;
     const response = await fetch('/api/backends/chat-completions/generate', {
         method: 'POST',
         headers: getRequestHeaders(),
+        signal,
         body: JSON.stringify({
             chat_completion_source: 'openai',
             model: options.modelName,
@@ -325,9 +342,12 @@ async function callGoogleDirect(messages: any[], options: any): Promise<string |
     // Simplified request conversion
     const contents = messages.map(msg => ({ role: msg.role === 'assistant' ? 'model' : 'user', parts: [{ text: msg.content }] }));
 
+    currentRequestController = new AbortController();
+    const signal = currentRequestController.signal;
     const response = await fetch(finalApiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal,
         body: JSON.stringify({ contents, generationConfig: { temperature: options.temperature, maxOutputTokens: options.max_tokens, topP: options.top_p, topK: options.top_k } })
     });
 
@@ -340,9 +360,12 @@ async function callGoogleDirect(messages: any[], options: any): Promise<string |
 }
 
 async function callSillyTavernBackend(messages: any[], options: any): Promise<string | null> {
+    currentRequestController = new AbortController();
+    const signal = currentRequestController.signal;
     const response = await fetch('/api/backends/chat-completions/generate', {
         method: 'POST',
         headers: getRequestHeaders(),
+        signal,
         body: JSON.stringify({
             chat_completion_source: 'custom',
             custom_url: options.apiUrl,
