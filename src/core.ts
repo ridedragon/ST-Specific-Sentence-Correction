@@ -641,7 +641,7 @@ export function manualOptimize(callback: (content: string) => void) {
  * @param text 要清理的文本。
  * @returns 清理后的文本。
  */
-function cleanTextWithRegex(text: string): string {
+export function cleanTextWithRegex(text: string): string {
   const settings = getPluginSettings();
   const regexFilters = settings.regexFilters || '';
 
