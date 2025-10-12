@@ -78,6 +78,10 @@
           <textarea v-model="settings.disabledWords" class="text_pole" rows="3"></textarea>
         </div>
         <div class="block">
+          <label>{{ t`正则表达式过滤器 (每行一个)` }}</label>
+          <textarea v-model="settings.regexFilters" class="text_pole" rows="5"></textarea>
+        </div>
+        <div class="block">
           <label>{{ t`最后一条角色消息 (自动刷新)` }}</label>
           <textarea v-model="lastCharMessageContent" class="text_pole" rows="4" readonly></textarea>
         </div>

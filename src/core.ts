@@ -99,7 +99,10 @@ async function onGenerationEnded(messageId: number) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
       }
-      const sourceContent = sentences.join('\n');
+      
+      // 清理并编号，与手动流程保持一致
+      const cleanedContent = cleanTextWithRegex(sentences.join('\n'));
+      const sourceContent = cleanedContent.split('\n').map((s, i) => `${i + 1}. ${s}`).join('\n');
 
       showToast('success', '句子提取成功，正在发送给AI优化...');
       const optimizedResultText = await getOptimizedText(sourceContent);
@@ -617,14 +620,49 @@ export function manualOptimize(callback: (content: string) => void) {
   const sentences = extractSentencesWithWords(messageText, disabledWords);
 
   if (sentences.length > 0) {
-    showToast('success', '已提取待优化内容。');
-    const numberedSentences = sentences.map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
+    const joinedSentences = sentences.join('\n');
+    const cleanedContent = cleanTextWithRegex(joinedSentences);
+    showToast('success', '已提取并清理待优化内容。');
+    const numberedSentences = cleanedContent.split('\n').map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
     callback(numberedSentences);
   } else {
     // 在 Panel.vue 中处理此情况的UI反馈
     // (toastr as any).info('在最后一条角色消息中未找到包含禁用词的句子。');
     callback('');
   }
+}
+
+/**
+ * 使用正则表达式列表清理文本。
+ * @param text 要清理的文本。
+ * @returns 清理后的文本。
+ */
+function cleanTextWithRegex(text: string): string {
+  const settings = getPluginSettings();
+  const regexFilters = settings.regexFilters || '';
+
+  if (!regexFilters.trim()) {
+    return text;
+  }
+
+  const regexPatterns = regexFilters
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+
+  let cleanedText = text;
+  for (const pattern of regexPatterns) {
+    try {
+      // 假设用户输入的都是有效的正则表达式字符串
+      const regex = new RegExp(pattern, 'gs');
+      cleanedText = cleanedText.replace(regex, '');
+    } catch (error) {
+      console.error(`[AI Optimizer] 无效的正则表达式: "${pattern}"`, error);
+      // 如果某个表达式无效，可以选择跳过它
+    }
+  }
+
+  return cleanedText.trim();
 }
 
 /**
