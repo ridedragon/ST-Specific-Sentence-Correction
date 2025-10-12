@@ -139,7 +139,7 @@ import CustomSlider from '@/components/CustomSlider.vue';
 import { useSettingsStore } from '@/store/settings';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage } from '@/core';
+import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, cleanTextWithRegex } from '@/core';
 
 const { settings } = storeToRefs(useSettingsStore());
 const modelList = ref<string[]>([]);
@@ -163,10 +163,13 @@ watch(lastCharMessageContent, (newMessage, oldMessage) => {
     return;
   }
 
+  // 先用正则清理，再检查禁用词
+  const cleanedMessage = cleanTextWithRegex(newMessage);
+
   // 修正：移除 \b 并对特殊字符进行转义，以支持中文和特殊字符
   const hasDisabledWord = disabledWords.some(word => {
     const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    return new RegExp(escapedWord, 'i').test(newMessage);
+    return new RegExp(escapedWord, 'i').test(cleanedMessage);
   });
 
   if (hasDisabledWord) {

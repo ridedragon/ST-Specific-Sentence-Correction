@@ -78,7 +78,10 @@ async function onGenerationEnded(messageId: number) {
     return;
   }
   const latestMessage = messages[0];
-  const messageText = latestMessage.message;
+  const originalMessageText = latestMessage.message;
+
+  // 先用正则清理，再检查禁用词
+  const cleanedMessageText = cleanTextWithRegex(originalMessageText);
 
   // 检查禁用词
   const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
@@ -86,15 +89,16 @@ async function onGenerationEnded(messageId: number) {
     return;
   }
 
-  const foundWords = disabledWords.filter((word: string) => new RegExp(`\\b${word}\\b`, 'i').test(messageText));
+  const foundWords = disabledWords.filter((word: string) => new RegExp(`\\b${word}\\b`, 'i').test(cleanedMessageText));
 
   if (foundWords.length > 0) {
-    console.log(`Found disabled words: ${foundWords.join(', ')}`);
+    console.log(`Found disabled words in cleaned text: ${foundWords.join(', ')}`);
     
     // 自动优化流程
     try {
       showToast('info', '检测到禁用词，自动优化流程已启动...');
-      const sentences = extractSentencesWithWords(messageText, foundWords);
+      // 在原始文本中提取句子，以保留上下文
+      const sentences = extractSentencesWithWords(originalMessageText, foundWords);
       if (sentences.length === 0) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
