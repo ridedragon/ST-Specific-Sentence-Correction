@@ -443,8 +443,10 @@ async function getOptimizedText(textToOptimize: string): Promise<string> {
  * @param words 要查找的单词数组。
  */
 function extractSentencesWithWords(text: string, words: string[]): string[] {
+    // 首先，剥离所有HTML标签，以避免<br>等标签的干扰。
+    const plainText = text.replace(/<[^>]*>/g, '');
     // 改进的正则表达式，能更好地处理中英文标点，并在找不到标点时将整个文本视为一个句子。
-    const sentences = text.match(/[^.!?。！？]+[.!?。！？]?/g) || [text];
+    const sentences = plainText.match(/[^.!?。！？]+[.!?。！？]?/g) || [plainText];
     const uniqueSentences = new Set<string>();
 
     words.forEach(word => {
@@ -473,6 +475,9 @@ function extractSentencesWithWords(text: string, words: string[]): string[] {
                 
                 // 再次移除可能出现的前导引号
                 cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+/, '').trim();
+
+                // 根据新规则：移除所有非字母、非数字开头的字符，以确保句子以文本开始
+                cleanedSentence = cleanedSentence.replace(/^[^\p{L}\p{N}]+/u, '').trim();
 
                 uniqueSentences.add(cleanedSentence);
             }
