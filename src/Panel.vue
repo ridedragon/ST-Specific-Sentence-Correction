@@ -10,7 +10,7 @@
         <b>{{ t`生成设置` }}</b>
         <div class="block">
           <label>{{ t`Temperature` }} ({{ settings.temperature }})</label>
-          <input v-model.number="settings.temperature" type="range" min="0" max="2" step="0.1" class="slider" />
+          <input v-model.number="settings.temperature" type="range" min="0" max="2" step="0.01" class="slider" />
         </div>
         <div class="block">
           <label>{{ t`Max Tokens` }}</label>
@@ -18,7 +18,7 @@
         </div>
         <div class="block">
           <label>{{ t`Top P` }} ({{ settings.top_p }})</label>
-          <input v-model.number="settings.top_p" type="range" min="0" max="1" step="0.05" class="slider" />
+          <input v-model.number="settings.top_p" type="range" min="0" max="1" step="0.01" class="slider" />
         </div>
         <div class="block">
           <label>{{ t`Top K` }}</label>
@@ -342,5 +342,58 @@ onUnmounted(() => {
 }
 .menu_button {
   white-space: nowrap;
+}
+
+/* 优化滑动条样式，确保在移动设备上正常显示 */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  background: #ddd;
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: .2s;
+  transition: opacity .2s;
+  border-radius: 4px;
+}
+
+.slider:hover {
+  opacity: 1;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: #4CAF50;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  background: #4CAF50;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+/* 针对移动设备进行微调 */
+@media (max-width: 768px) {
+  .slider {
+    height: 10px; /* 增加触摸区域 */
+  }
+
+  .slider::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+  }
+
+  .slider::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
 }
 </style>
