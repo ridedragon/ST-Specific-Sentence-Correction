@@ -346,6 +346,7 @@ onUnmounted(() => {
 
 .slider-block {
   position: relative;
+  padding-bottom: 10px; /* 为滑块留出空间，防止遮挡下方内容 */
 }
 
 /* 优化滑动条样式，确保在移动设备上正常显示 */
@@ -374,6 +375,7 @@ onUnmounted(() => {
   background: #4CAF50;
   cursor: pointer;
   border-radius: 50%;
+  margin-top: -5px; /* (轨道高度 - 滑块高度) / 2 = (8px - 18px) / 2 = -5px */
 }
 
 .slider::-moz-range-thumb {
@@ -393,6 +395,7 @@ onUnmounted(() => {
   .slider::-webkit-slider-thumb {
     width: 18px; /* 减小滑块尺寸 */
     height: 18px;
+    margin-top: -6px; /* (轨道高度 - 滑块高度) / 2 = (6px - 18px) / 2 = -6px */
   }
 
   .slider::-moz-range-thumb {
