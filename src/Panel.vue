@@ -387,17 +387,17 @@ onUnmounted(() => {
 /* 针对移动设备进行微调 */
 @media (max-width: 768px) {
   .slider {
-    height: 10px; /* 增加触摸区域 */
+    height: 6px; /* 减小轨道厚度 */
   }
 
   .slider::-webkit-slider-thumb {
-    width: 24px;
-    height: 24px;
+    width: 18px; /* 减小滑块尺寸 */
+    height: 18px;
   }
 
   .slider::-moz-range-thumb {
-    width: 24px;
-    height: 24px;
+    width: 18px; /* 减小滑块尺寸 */
+    height: 18px;
   }
 }
 </style>
