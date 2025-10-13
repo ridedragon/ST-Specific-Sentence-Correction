@@ -1,4 +1,4 @@
-import { getContext, extension_settings } from '@sillytavern/scripts/extensions';
+import { extension_settings, getContext } from '@sillytavern/scripts/extensions';
 import { Settings, setting_field } from './type/settings';
 
 // 类型安全的设置获取辅助函数
@@ -53,7 +53,7 @@ export function initialize() {
   // 监听角色消息渲染完成事件，这个事件在消息完全显示后触发，更可靠
   context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onGenerationEnded);
   console.log('[AI Optimizer] "CHARACTER_MESSAGE_RENDERED" event listener registered.');
-  
+
   showToast('success', 'AI 文本优化助手已成功加载！');
   (window as any).isAiOptimizerInitialized = true;
 }
@@ -84,7 +84,10 @@ async function onGenerationEnded(messageId: number) {
   const cleanedMessage = cleanTextWithRegex(messageText);
 
   // 检查禁用词
-  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  const disabledWords = (settings.disabledWords || '')
+    .split(',')
+    .map((w: string) => w.trim())
+    .filter(Boolean);
   if (disabledWords.length === 0) {
     return;
   }
@@ -94,7 +97,7 @@ async function onGenerationEnded(messageId: number) {
 
   if (hasDisabledWord) {
     console.log(`[AI Optimizer] Found disabled words in cleaned message.`);
-    
+
     // 自动优化流程
     try {
       showToast('info', '检测到禁用词，自动优化流程已启动...');
@@ -104,7 +107,7 @@ async function onGenerationEnded(messageId: number) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
       }
-      
+
       // 此时句子已经是干净的，直接编号即可
       const sourceContent = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
 
@@ -121,7 +124,6 @@ async function onGenerationEnded(messageId: number) {
       showToast('success', 'AI优化完成，正在执行替换...');
       await replaceMessageInternal(latestMessage, sourceContent, optimizedResultText);
       showToast('success', '自动优化完成！', '成功', { timeOut: 5000 });
-
     } catch (error: any) {
       console.error('[Auto Optimizer] 流程执行出错:', error);
       showToast('error', error.message, '自动化流程失败', { timeOut: 10000 });
@@ -137,7 +139,10 @@ async function onGenerationEnded(messageId: number) {
 export function checkMessageForDisabledWords(messageText: string): boolean {
   const settings = getPluginSettings();
   const cleanedMessage = cleanTextWithRegex(messageText);
-  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  const disabledWords = (settings.disabledWords || '')
+    .split(',')
+    .map((w: string) => w.trim())
+    .filter(Boolean);
 
   if (disabledWords.length === 0) {
     return false;
@@ -226,7 +231,12 @@ async function showOptimizationPopup(originalMessage: any, foundWords: string[],
   }
 }
 
-async function showReplacementPopup(originalMessage: any, originalSentences: string[], optimizedText: string, isManual: boolean) {
+async function showReplacementPopup(
+  originalMessage: any,
+  originalSentences: string[],
+  optimizedText: string,
+  isManual: boolean,
+) {
   const context = getContext();
   const popupId = 'ai-optimizer-replacement-popup';
   const popupTitle = '预览并替换';
@@ -244,30 +254,32 @@ async function showReplacementPopup(originalMessage: any, originalSentences: str
     cancelButton: '取消',
   });
 
-    if (confirmReplace) {
-        let newFullMessage = originalMessage.message;
+  if (confirmReplace) {
+    let newFullMessage = originalMessage.message;
 
-        if (isManual) {
-            newFullMessage = optimizedText;
+    if (isManual) {
+      newFullMessage = optimizedText;
+    } else {
+      originalSentences.forEach((sentence, index) => {
+        if (index === 0) {
+          newFullMessage = newFullMessage.replace(sentence, optimizedText);
         } else {
-            originalSentences.forEach((sentence, index) => {
-                if (index === 0) {
-                    newFullMessage = newFullMessage.replace(sentence, optimizedText);
-                } else {
-                    newFullMessage = newFullMessage.replace(sentence, '');
-                }
-            });
+          newFullMessage = newFullMessage.replace(sentence, '');
         }
-
-        // 将 \n 替换为 <br> 以便在聊天中正确显示换行
-        const formattedMessage = newFullMessage.trim().replace(/\n/g, '<br>');
-
-        await (window as any).TavernHelper.setChatMessages([{
-            message_id: originalMessage.message_id,
-            message: formattedMessage,
-        }]);
-        showToast('success', '消息已成功替换！');
+      });
     }
+
+    // 将 \n 替换为 <br> 以便在聊天中正确显示换行
+    const formattedMessage = newFullMessage.trim().replace(/\n/g, '<br>');
+
+    await (window as any).TavernHelper.setChatMessages([
+      {
+        message_id: originalMessage.message_id,
+        message: formattedMessage,
+      },
+    ]);
+    showToast('success', '消息已成功替换！');
+  }
 }
 
 let currentRequestController: AbortController | null = null;
@@ -282,179 +294,187 @@ export function abortOptimization() {
 }
 
 async function callOpenAICompatible(messages: any[], options: any): Promise<string | null> {
-    const baseUrl = options.apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
-    const apiUrl = `${baseUrl}/v1/chat/completions`;
-    currentRequestController = new AbortController();
-    const signal = currentRequestController.signal;
-    const response = await fetch(apiUrl, {
-        method: 'POST',
-        signal,
-        headers: { 'Authorization': `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            model: options.modelName,
-            messages: messages,
-            max_tokens: options.max_tokens,
-            temperature: options.temperature,
-            top_p: options.top_p,
-            top_k: options.top_k,
-            stream: false
-        })
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenAI-compatible API request failed: ${response.status} - ${errorText}`);
-    }
-    const responseData = await response.json();
-    return responseData?.choices?.[0]?.message?.content ?? null;
+  const baseUrl = options.apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+  const apiUrl = `${baseUrl}/v1/chat/completions`;
+  currentRequestController = new AbortController();
+  const signal = currentRequestController.signal;
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    signal,
+    headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: options.modelName,
+      messages: messages,
+      max_tokens: options.max_tokens,
+      temperature: options.temperature,
+      top_p: options.top_p,
+      top_k: options.top_k,
+      stream: false,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI-compatible API request failed: ${response.status} - ${errorText}`);
+  }
+  const responseData = await response.json();
+  return responseData?.choices?.[0]?.message?.content ?? null;
 }
 
 async function callOpenAITest(messages: any[], options: any): Promise<string | null> {
-    currentRequestController = new AbortController();
-    const signal = currentRequestController.signal;
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        signal,
-        body: JSON.stringify({
-            chat_completion_source: 'openai',
-            model: options.modelName,
-            messages: messages,
-            max_tokens: options.max_tokens,
-            temperature: options.temperature,
-            top_p: options.top_p,
-            top_k: options.top_k,
-            reverse_proxy: options.apiUrl,
-            proxy_password: options.apiKey,
-            stream: false
-        })
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`OpenAI (Test) API request failed: ${response.status} - ${errorText}`);
-    }
-    const responseData = await response.json();
-    return responseData?.choices?.[0]?.message?.content ?? null;
+  currentRequestController = new AbortController();
+  const signal = currentRequestController.signal;
+  const response = await fetch('/api/backends/chat-completions/generate', {
+    method: 'POST',
+    headers: getRequestHeaders(),
+    signal,
+    body: JSON.stringify({
+      chat_completion_source: 'openai',
+      model: options.modelName,
+      messages: messages,
+      max_tokens: options.max_tokens,
+      temperature: options.temperature,
+      top_p: options.top_p,
+      top_k: options.top_k,
+      reverse_proxy: options.apiUrl,
+      proxy_password: options.apiKey,
+      stream: false,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI (Test) API request failed: ${response.status} - ${errorText}`);
+  }
+  const responseData = await response.json();
+  return responseData?.choices?.[0]?.message?.content ?? null;
 }
 
 // Note: Google adapter functions (convertToGoogleRequest, parseGoogleResponse) would need to be implemented.
 // For now, we'll assume a simplified direct call.
 async function callGoogleDirect(messages: any[], options: any): Promise<string | null> {
-    const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
-    const apiVersion = options.modelName.includes('gemini-1.5') ? 'v1beta' : 'v1';
-    const finalApiUrl = `${GOOGLE_API_BASE_URL}/${apiVersion}/models/${options.modelName}:generateContent?key=${options.apiKey}`;
-    
-    // Simplified request conversion
-    const contents = messages.map(msg => ({ role: msg.role === 'assistant' ? 'model' : 'user', parts: [{ text: msg.content }] }));
+  const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
+  const apiVersion = options.modelName.includes('gemini-1.5') ? 'v1beta' : 'v1';
+  const finalApiUrl = `${GOOGLE_API_BASE_URL}/${apiVersion}/models/${options.modelName}:generateContent?key=${options.apiKey}`;
 
-    currentRequestController = new AbortController();
-    const signal = currentRequestController.signal;
-    const response = await fetch(finalApiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal,
-        body: JSON.stringify({ contents, generationConfig: { temperature: options.temperature, maxOutputTokens: options.max_tokens, topP: options.top_p, topK: options.top_k } })
-    });
+  // Simplified request conversion
+  const contents = messages.map(msg => ({
+    role: msg.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: msg.content }],
+  }));
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Google API request failed: ${response.status} - ${errorText}`);
-    }
-    const responseData = await response.json();
-    return responseData?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+  currentRequestController = new AbortController();
+  const signal = currentRequestController.signal;
+  const response = await fetch(finalApiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      contents,
+      generationConfig: {
+        temperature: options.temperature,
+        maxOutputTokens: options.max_tokens,
+        topP: options.top_p,
+        topK: options.top_k,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Google API request failed: ${response.status} - ${errorText}`);
+  }
+  const responseData = await response.json();
+  return responseData?.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
 }
 
 async function callSillyTavernBackend(messages: any[], options: any): Promise<string | null> {
-    currentRequestController = new AbortController();
-    const signal = currentRequestController.signal;
-    const response = await fetch('/api/backends/chat-completions/generate', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        signal,
-        body: JSON.stringify({
-            chat_completion_source: 'custom',
-            custom_url: options.apiUrl,
-            api_key: options.apiKey,
-            model: options.modelName,
-            messages: messages,
-            max_tokens: options.max_tokens,
-            temperature: options.temperature,
-            top_p: options.top_p,
-            top_k: options.top_k,
-            stream: false
-        })
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`SillyTavern Backend API request failed: ${response.status} - ${errorText}`);
-    }
-    const result = await response.json();
-    return result?.choices?.[0]?.message?.content ?? null;
+  currentRequestController = new AbortController();
+  const signal = currentRequestController.signal;
+  const response = await fetch('/api/backends/chat-completions/generate', {
+    method: 'POST',
+    headers: getRequestHeaders(),
+    signal,
+    body: JSON.stringify({
+      chat_completion_source: 'custom',
+      custom_url: options.apiUrl,
+      api_key: options.apiKey,
+      model: options.modelName,
+      messages: messages,
+      max_tokens: options.max_tokens,
+      temperature: options.temperature,
+      top_p: options.top_p,
+      top_k: options.top_k,
+      stream: false,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`SillyTavern Backend API request failed: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  return result?.choices?.[0]?.message?.content ?? null;
 }
 
 async function callSillyTavernPreset(messages: any[], options: any): Promise<string | null> {
-    const context = getContext() as any;
-    if (!context.ConnectionManagerRequestService) {
-        throw new Error('ConnectionManagerRequestService is not available.');
-    }
-    // This requires finding the profile ID from settings, which is not implemented yet.
-    // For now, we'll throw an error.
-    throw new Error("SillyTavern Preset provider is not fully implemented yet.");
-    // Example of how it could work:
-    // const result = await context.ConnectionManagerRequestService.sendRequest(profileId, messages, options.maxTokens);
-    // return result?.choices?.[0]?.message?.content ?? null;
+  const context = getContext() as any;
+  if (!context.ConnectionManagerRequestService) {
+    throw new Error('ConnectionManagerRequestService is not available.');
+  }
+  // This requires finding the profile ID from settings, which is not implemented yet.
+  // For now, we'll throw an error.
+  throw new Error('SillyTavern Preset provider is not fully implemented yet.');
+  // Example of how it could work:
+  // const result = await context.ConnectionManagerRequestService.sendRequest(profileId, messages, options.maxTokens);
+  // return result?.choices?.[0]?.message?.content ?? null;
 }
 
-
 async function callAI(messages: any[], options: any = {}): Promise<string | null> {
-    const settings = getPluginSettings();
-    const finalOptions = {
-        ...settings,
-        ...options,
-    };
+  const settings = getPluginSettings();
+  const finalOptions = {
+    ...settings,
+    ...options,
+  };
 
-    if (finalOptions.apiProvider !== 'sillytavern_preset' && (!finalOptions.apiUrl || !finalOptions.modelName)) {
-        showToast('error', "API URL或模型未配置，无法调用AI。");
-        return null;
-    }
+  if (finalOptions.apiProvider !== 'sillytavern_preset' && (!finalOptions.apiUrl || !finalOptions.modelName)) {
+    showToast('error', 'API URL或模型未配置，无法调用AI。');
+    return null;
+  }
 
-    try {
-        switch (finalOptions.apiProvider) {
-            case 'openai':
-                return await callOpenAICompatible(messages, finalOptions);
-            case 'openai_test':
-                return await callOpenAITest(messages, finalOptions);
-            case 'google':
-                return await callGoogleDirect(messages, finalOptions);
-            case 'sillytavern_backend':
-                return await callSillyTavernBackend(messages, finalOptions);
-            case 'sillytavern_preset':
-                return await callSillyTavernPreset(messages, finalOptions);
-            default:
-                throw new Error(`Unsupported API provider: ${finalOptions.apiProvider}`);
-        }
-    } catch (error: any) {
-        if (error.name === 'AbortError') {
-            // The abortOptimization function already shows an info toast.
-            console.log('API call was aborted by the user.');
-            return null;
-        }
-        console.error(`API call failed:`, error);
-        showToast('error', `API调用失败: ${error.message}`);
-        return null;
+  try {
+    switch (finalOptions.apiProvider) {
+      case 'openai':
+        return await callOpenAICompatible(messages, finalOptions);
+      case 'openai_test':
+        return await callOpenAITest(messages, finalOptions);
+      case 'google':
+        return await callGoogleDirect(messages, finalOptions);
+      case 'sillytavern_backend':
+        return await callSillyTavernBackend(messages, finalOptions);
+      case 'sillytavern_preset':
+        return await callSillyTavernPreset(messages, finalOptions);
+      default:
+        throw new Error(`Unsupported API provider: ${finalOptions.apiProvider}`);
     }
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      // The abortOptimization function already shows an info toast.
+      console.log('API call was aborted by the user.');
+      return null;
+    }
+    console.error(`API call failed:`, error);
+    showToast('error', `API调用失败: ${error.message}`);
+    return null;
+  }
 }
 
 function getSystemPrompt(): string {
   const settings = getPluginSettings();
-  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  const disabledWords = (settings.disabledWords || '')
+    .split(',')
+    .map((w: string) => w.trim())
+    .filter(Boolean);
   const { main, system, final_system } = settings.promptSettings;
 
-  return [
-    main,
-    system,
-    `必须避免使用这些词：[${disabledWords.join(', ')}]`,
-    final_system,
-  ].filter(Boolean).join('\n');
+  return [main, system, `必须避免使用这些词：[${disabledWords.join(', ')}]`, final_system].filter(Boolean).join('\n');
 }
 
 async function getOptimizedText(textToOptimize: string): Promise<string | null> {
@@ -463,7 +483,7 @@ async function getOptimizedText(textToOptimize: string): Promise<string | null> 
     { role: 'system', content: systemPrompt },
     { role: 'user', content: `待优化句子：\n${textToOptimize}` },
   ];
-  
+
   const result = await callAI(messages);
 
   return result;
@@ -475,182 +495,190 @@ async function getOptimizedText(textToOptimize: string): Promise<string | null> 
  * @param words 要查找的单词数组。
  */
 function extractSentencesWithWords(text: string, words: string[]): string[] {
-    // 首先，剥离所有HTML标签，以避免<br>等标签的干扰。
-    const plainText = text.replace(/<[^>]*>/g, '');
-    // 改进的正则表达式，能更好地处理中英文标点，并在找不到标点时将整个文本视为一个句子。
-    const sentences = plainText.match(/[^.!?。！？]+[.!?。！？]?/g) || [plainText];
-    const uniqueSentences = new Set<string>();
+  // 首先，剥离所有HTML标签，以避免<br>等标签的干扰。
+  const plainText = text.replace(/<[^>]*>/g, '');
+  // 改进的正则表达式，能更好地处理中英文标点，并在找不到标点时将整个文本视为一个句子。
+  const sentences = plainText.match(/[^.!?。！？]+[.!?。！？]?/g) || [plainText];
+  const uniqueSentences = new Set<string>();
 
-    words.forEach(word => {
-        // 创建一个对特殊字符进行转义的正则表达式
-        const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const regex = new RegExp(escapedWord, 'i');
-        sentences.forEach(sentence => {
-            if (regex.test(sentence)) {
-                // 移除换行符
-                let cleanedSentence = sentence.replace(/[\r\n]/g, ' ').trim();
-                
-                // 移除所有星号
-                cleanedSentence = cleanedSentence.replace(/\*/g, '');
+  words.forEach(word => {
+    // 创建一个对特殊字符进行转义的正则表达式
+    const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const regex = new RegExp(escapedWord, 'i');
+    sentences.forEach(sentence => {
+      if (regex.test(sentence)) {
+        // 移除换行符
+        let cleanedSentence = sentence.replace(/[\r\n]/g, ' ').trim();
 
-                // 移除句子开头和结尾的引号和空格
-                cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
+        // 移除所有星号
+        cleanedSentence = cleanedSentence.replace(/\*/g, '');
 
-                // 如果句子中包含 "……"，则只取最后一个 "……" 之后的部分
-                const ellipsisIndex = cleanedSentence.lastIndexOf('……');
-                if (ellipsisIndex !== -1) {
-                    // 确保 "……" 后面有内容
-                    if (ellipsisIndex + 2 < cleanedSentence.length) {
-                        cleanedSentence = cleanedSentence.substring(ellipsisIndex + 2);
-                    }
-                }
-                
-                // 再次移除可能出现的前导引号
-                cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+/, '').trim();
+        // 移除句子开头和结尾的引号和空格
+        cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
 
-                // 根据新规则：移除所有非字母、非数字开头的字符，以确保句子以文本开始
-                cleanedSentence = cleanedSentence.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+        // 如果句子中包含 "……"，则只取最后一个 "……" 之后的部分
+        const ellipsisIndex = cleanedSentence.lastIndexOf('……');
+        if (ellipsisIndex !== -1) {
+          // 确保 "……" 后面有内容
+          if (ellipsisIndex + 2 < cleanedSentence.length) {
+            cleanedSentence = cleanedSentence.substring(ellipsisIndex + 2);
+          }
+        }
 
-                uniqueSentences.add(cleanedSentence);
-            }
-        });
+        // 再次移除可能出现的前导引号
+        cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+/, '').trim();
+
+        // 根据新规则：移除所有非字母、非数字开头的字符，以确保句子以文本开始
+        cleanedSentence = cleanedSentence.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+
+        uniqueSentences.add(cleanedSentence);
+      }
     });
+  });
 
-    return Array.from(uniqueSentences);
+  return Array.from(uniqueSentences);
 }
-
 
 // Helper to get request headers for SillyTavern API
 const getRequestHeaders = () => {
-    const context = getContext() as any;
-    return {
-        'X-CSRF-Token': context.token,
-        'Content-Type': 'application/json',
-    };
+  const context = getContext() as any;
+  return {
+    'X-CSRF-Token': context.token,
+    'Content-Type': 'application/json',
+  };
 };
 
 async function fetchOpenAICompatibleModels(apiUrl: string, apiKey: string): Promise<string[]> {
-    if (!apiUrl || !apiKey) {
-        throw new Error("OpenAI兼容模式需要API URL和API Key");
-    }
-    const baseUrl = apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
-    const modelsUrl = `${baseUrl}/v1/models`;
-    const response = await fetch(modelsUrl, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-    const data = await response.json();
-    const models = data.data || data.models || [];
-    return models.map((m: any) => m.id || m.model).filter(Boolean).sort();
+  if (!apiUrl || !apiKey) {
+    throw new Error('OpenAI兼容模式需要API URL和API Key');
+  }
+  const baseUrl = apiUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+  const modelsUrl = `${baseUrl}/v1/models`;
+  const response = await fetch(modelsUrl, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+  const data = await response.json();
+  const models = data.data || data.models || [];
+  return models
+    .map((m: any) => m.id || m.model)
+    .filter(Boolean)
+    .sort();
 }
 
 async function fetchOpenAITestModels(apiUrl: string, apiKey: string): Promise<string[]> {
-    const response = await fetch('/api/backends/chat-completions/status', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            reverse_proxy: apiUrl,
-            proxy_password: apiKey,
-            chat_completion_source: 'openai'
-        })
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-    const rawData = await response.json();
-    const models = Array.isArray(rawData) ? rawData : (rawData.data || rawData.models || []);
-    if (!Array.isArray(models)) {
-        throw new Error('API未返回有效的模型列表数组');
-    }
-    return models.map((m: any) => m.name ? m.name.replace('models/', '') : (m.id || m.model || m)).filter(Boolean).sort();
+  const response = await fetch('/api/backends/chat-completions/status', {
+    method: 'POST',
+    headers: getRequestHeaders(),
+    body: JSON.stringify({
+      reverse_proxy: apiUrl,
+      proxy_password: apiKey,
+      chat_completion_source: 'openai',
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+  const rawData = await response.json();
+  const models = Array.isArray(rawData) ? rawData : rawData.data || rawData.models || [];
+  if (!Array.isArray(models)) {
+    throw new Error('API未返回有效的模型列表数组');
+  }
+  return models
+    .map((m: any) => (m.name ? m.name.replace('models/', '') : m.id || m.model || m))
+    .filter(Boolean)
+    .sort();
 }
 
 async function fetchGoogleDirectModels(apiKey: string): Promise<string[]> {
-    if (!apiKey) {
-        throw new Error("Google直连模式需要API Key");
-    }
-    const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
-    const fetchGoogleModels = async (version: string) => {
-        const url = `${GOOGLE_API_BASE_URL}/${version}/models?key=${apiKey}`;
-        const response = await fetch(url);
-        if (!response.ok) return [];
-        const json = await response.json();
-        if (!json.models || !Array.isArray(json.models)) return [];
-        return json.models
-            .filter((model: any) => model.supportedGenerationMethods?.includes('generateContent'))
-            .map((model: any) => model.name.replace('models/', ''));
-    };
-    const [v1Models, v1betaModels] = await Promise.all([fetchGoogleModels('v1'), fetchGoogleModels('v1beta')]);
-    return [...new Set([...v1Models, ...v1betaModels])].sort();
+  if (!apiKey) {
+    throw new Error('Google直连模式需要API Key');
+  }
+  const GOOGLE_API_BASE_URL = 'https://generativelanguage.googleapis.com';
+  const fetchGoogleModels = async (version: string) => {
+    const url = `${GOOGLE_API_BASE_URL}/${version}/models?key=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    const json = await response.json();
+    if (!json.models || !Array.isArray(json.models)) return [];
+    return json.models
+      .filter((model: any) => model.supportedGenerationMethods?.includes('generateContent'))
+      .map((model: any) => model.name.replace('models/', ''));
+  };
+  const [v1Models, v1betaModels] = await Promise.all([fetchGoogleModels('v1'), fetchGoogleModels('v1beta')]);
+  return [...new Set([...v1Models, ...v1betaModels])].sort();
 }
 
 async function fetchSillyTavernBackendModels(apiUrl: string, apiKey: string): Promise<string[]> {
-    if (!apiUrl) {
-        throw new Error("SillyTavern后端模式需要API URL");
-    }
-    const response = await fetch('/api/backends/chat-completions/status', {
-        method: 'POST',
-        headers: getRequestHeaders(),
-        body: JSON.stringify({
-            chat_completion_source: 'custom',
-            custom_url: apiUrl,
-            api_key: apiKey
-        })
-    });
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-    const result = await response.json();
-    const models = result.data || [];
-    if (result.error || !Array.isArray(models)) {
-        const errorMessage = result.error?.message || 'API未返回有效的模型列表数组';
-        throw new Error(errorMessage);
-    }
-    return models.map((model: any) => model.id || model.model).filter(Boolean).sort();
+  if (!apiUrl) {
+    throw new Error('SillyTavern后端模式需要API URL');
+  }
+  const response = await fetch('/api/backends/chat-completions/status', {
+    method: 'POST',
+    headers: getRequestHeaders(),
+    body: JSON.stringify({
+      chat_completion_source: 'custom',
+      custom_url: apiUrl,
+      api_key: apiKey,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errorText}`);
+  }
+  const result = await response.json();
+  const models = result.data || [];
+  if (result.error || !Array.isArray(models)) {
+    const errorMessage = result.error?.message || 'API未返回有效的模型列表数组';
+    throw new Error(errorMessage);
+  }
+  return models
+    .map((model: any) => model.id || model.model)
+    .filter(Boolean)
+    .sort();
 }
 
 async function fetchSillyTavernPresetModels(): Promise<string[]> {
-    const context = getContext() as any;
-    if (!context) throw new Error("无法获取SillyTavern上下文");
-    const defaultModels = ['gpt-3.5-turbo', 'gpt-4', 'claude-3-sonnet', 'claude-3-haiku', 'gemini-pro'];
-    const currentModel = context.chat_completion_source;
-    const models = currentModel ? [currentModel] : [];
-    return [...new Set([...models, ...defaultModels])].sort();
+  const context = getContext() as any;
+  if (!context) throw new Error('无法获取SillyTavern上下文');
+  const defaultModels = ['gpt-3.5-turbo', 'gpt-4', 'claude-3-sonnet', 'claude-3-haiku', 'gemini-pro'];
+  const currentModel = context.chat_completion_source;
+  const models = currentModel ? [currentModel] : [];
+  return [...new Set([...models, ...defaultModels])].sort();
 }
 
 export async function fetchModelsFromApi(): Promise<string[]> {
-    const settings = getPluginSettings();
-    try {
-        switch (settings.apiProvider) {
-            case 'openai':
-                return await fetchOpenAICompatibleModels(settings.apiUrl, settings.apiKey);
-            case 'openai_test':
-                return await fetchOpenAITestModels(settings.apiUrl, settings.apiKey);
-            case 'google':
-                return await fetchGoogleDirectModels(settings.apiKey);
-            case 'sillytavern_backend':
-                return await fetchSillyTavernBackendModels(settings.apiUrl, settings.apiKey);
-            case 'sillytavern_preset':
-                return await fetchSillyTavernPresetModels();
-            default:
-                throw new Error(`未支持的API提供商: ${settings.apiProvider}`);
-        }
-    } catch (error: any) {
-        console.error('获取模型列表失败:', error);
-        showToast('error', `获取模型列表失败: ${error.message}`, "任务失败");
-        return [];
+  const settings = getPluginSettings();
+  try {
+    switch (settings.apiProvider) {
+      case 'openai':
+        return await fetchOpenAICompatibleModels(settings.apiUrl, settings.apiKey);
+      case 'openai_test':
+        return await fetchOpenAITestModels(settings.apiUrl, settings.apiKey);
+      case 'google':
+        return await fetchGoogleDirectModels(settings.apiKey);
+      case 'sillytavern_backend':
+        return await fetchSillyTavernBackendModels(settings.apiUrl, settings.apiKey);
+      case 'sillytavern_preset':
+        return await fetchSillyTavernPresetModels();
+      default:
+        throw new Error(`未支持的API提供商: ${settings.apiProvider}`);
     }
+  } catch (error: any) {
+    console.error('获取模型列表失败:', error);
+    showToast('error', `获取模型列表失败: ${error.message}`, '任务失败');
+    return [];
+  }
 }
 
 export async function testApiConnection(): Promise<boolean> {
-    const models = await fetchModelsFromApi();
-    return models.length > 0;
+  const models = await fetchModelsFromApi();
+  return models.length > 0;
 }
 
 /**
@@ -693,7 +721,10 @@ export function manualOptimize(callback: (content: string) => void) {
   // 步骤 1: 先对整个消息进行清理
   const cleanedMessage = cleanTextWithRegex(messageText);
 
-  const disabledWords = (settings.disabledWords || '').split(',').map((w: string) => w.trim()).filter(Boolean);
+  const disabledWords = (settings.disabledWords || '')
+    .split(',')
+    .map((w: string) => w.trim())
+    .filter(Boolean);
   if (disabledWords.length === 0) {
     showToast('warning', '未设置禁用词，无法提取。');
     callback('');
@@ -746,10 +777,9 @@ function cleanTextWithRegex(text: string): string {
         // 如果用户提供了标志，则使用用户的；否则，保留我们的默认值
         flags = match[2] !== '' ? match[2] : flags;
       }
-      
+
       const regex = new RegExp(pattern, flags);
       cleanedText = cleanedText.replace(regex, '');
-
     } catch (error) {
       console.error(`[AI Optimizer] 无效的正则表达式: "${line}"`, error);
       // 如果某个表达式无效，则跳过它
@@ -765,21 +795,45 @@ function cleanTextWithRegex(text: string): string {
  * @param prompt 使用的系统提示词。
  * @returns 优化后的文本。
  */
-export async function optimizeText(textToOptimize: string, prompt: string, lastCharMessageText: string): Promise<string | null> {
+export async function optimizeText(
+  textToOptimize: string,
+  prompt: string,
+  lastCharMessageText: string,
+): Promise<string | null> {
   let processedPrompt = prompt;
+  let userContent = `待优化句子：\n${textToOptimize}`; // 默认用户内容
+
   if (processedPrompt.includes('{{charpuremessage}}')) {
-    const cleanedMessage = cleanTextWithRegex(lastCharMessageText);
-    processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, cleanedMessage);
+    // 1. 清理完整的原始消息
+    let contextText = cleanTextWithRegex(lastCharMessageText);
+    
+    // 2. 获取所有待优化的独立句子
+    const sentencesToOptimize = textToOptimize.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
+
+    // 3. 在上下文中标记这些句子
+    sentencesToOptimize.forEach(sentence => {
+      // 需要对句子中的特殊正则字符进行转义，以确保替换的准确性
+      const escapedSentence = sentence.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(escapedSentence, 'g');
+      contextText = contextText.replace(regex, `[START OPTIMIZE]${sentence}[END OPTIMIZE]`);
+    });
+
+    // 4. 将处理后的上下文替换到提示词中
+    processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, contextText);
+
+    // 5. 更新用户内容为您指定的引导性文本
+    userContent = '请根据下面的剧本上下文，对句子进行优化。被 `[START OPTIMIZE]` 和 `[END OPTIMIZE]` 标记内的句子是被提取的句子，必须结合前后文进行优化。请只返回优化后的句子，并保持原来的编号。';
   }
 
   const messages = [
     { role: 'system', content: processedPrompt },
-    { role: 'user', content: textToOptimize },
+    { role: 'user', content: userContent },
   ];
 
   console.log('--- Sending to AI for Optimization ---');
   console.log('Prompt:', processedPrompt);
-  console.log('Text to optimize:', textToOptimize);
+  console.log('User Content:', userContent);
+  console.log('Original sentences to optimize:', textToOptimize);
   console.log('------------------------------------');
 
   const result = await callAI(messages);
@@ -803,7 +857,10 @@ export async function optimizeText(textToOptimize: string, prompt: string, lastC
  */
 async function replaceMessageInternal(lastCharMessage: any, originalContent: string, optimizedContent: string) {
   const context = getContext();
-  const originalSentences = originalContent.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
+  const originalSentences = originalContent
+    .split('\n')
+    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
   const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
@@ -812,24 +869,24 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
     console.warn('[AI Optimizer] No original sentences to replace.');
     return;
   }
-  
+
   // 如果AI返回的句子数量与原始句子数量不匹配，则将所有原始句子替换为完整的优化后内容
   let modifiedMessage = lastCharMessage.mes;
   if (originalSentences.length !== optimizedSentences.length) {
-      console.warn('[AI Optimizer] Mismatch in sentence count. Replacing the whole block.');
-      // 找到第一个原始句子并替换整个块
-      const firstSentence = originalSentences[0];
-      modifiedMessage = modifiedMessage.replace(firstSentence, optimizedContent);
-      // 移除剩余的原始句子
-      for (let i = 1; i < originalSentences.length; i++) {
-          modifiedMessage = modifiedMessage.replace(originalSentences[i], '');
-      }
+    console.warn('[AI Optimizer] Mismatch in sentence count. Replacing the whole block.');
+    // 找到第一个原始句子并替换整个块
+    const firstSentence = originalSentences[0];
+    modifiedMessage = modifiedMessage.replace(firstSentence, optimizedContent);
+    // 移除剩余的原始句子
+    for (let i = 1; i < originalSentences.length; i++) {
+      modifiedMessage = modifiedMessage.replace(originalSentences[i], '');
+    }
   } else {
-      originalSentences.forEach((original, index) => {
-          const optimized = optimizedSentences[index];
-          const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
-          modifiedMessage = modifiedMessage.replace(regex, optimized);
-      });
+    originalSentences.forEach((original, index) => {
+      const optimized = optimizedSentences[index];
+      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+      modifiedMessage = modifiedMessage.replace(regex, optimized);
+    });
   }
 
   const tempVarName = `__optimizer_swipe_text_${Date.now()}`;
@@ -839,7 +896,7 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
   const commandChain = [
     `/setvar key=${tempVarName} ${safeMessageForSetvar}`,
     `/addswipe switch=true {{getvar::${tempVarName}}}`,
-    `/flushvar ${tempVarName}`
+    `/flushvar ${tempVarName}`,
   ].join(' | ');
 
   try {
@@ -880,7 +937,10 @@ export function replaceMessage(
     return;
   }
 
-  const originalSentences = originalContent.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
+  const originalSentences = originalContent
+    .split('\n')
+    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
+    .filter(Boolean);
   const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
@@ -919,7 +979,7 @@ export function getLastCharMessage(): string {
     if (context.utility && typeof context.utility.substitudeMacros === 'function') {
       // 尝试使用 context.utility 中的函数
       return context.utility.substitudeMacros('{{lastcharmessage}}');
-    } 
+    }
     // 作为备用方案，手动查找最后一条消息
     const chat = context.chat;
     if (!chat || chat.length === 0) {
