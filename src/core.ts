@@ -765,14 +765,20 @@ function cleanTextWithRegex(text: string): string {
  * @param prompt 使用的系统提示词。
  * @returns 优化后的文本。
  */
-export async function optimizeText(textToOptimize: string, prompt: string): Promise<string | null> {
+export async function optimizeText(textToOptimize: string, prompt: string, lastCharMessageText: string): Promise<string | null> {
+  let processedPrompt = prompt;
+  if (processedPrompt.includes('{{charpuremessage}}')) {
+    const cleanedMessage = cleanTextWithRegex(lastCharMessageText);
+    processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, cleanedMessage);
+  }
+
   const messages = [
-    { role: 'system', content: prompt },
+    { role: 'system', content: processedPrompt },
     { role: 'user', content: textToOptimize },
   ];
 
   console.log('--- Sending to AI for Optimization ---');
-  console.log('Prompt:', prompt);
+  console.log('Prompt:', processedPrompt);
   console.log('Text to optimize:', textToOptimize);
   console.log('------------------------------------');
 

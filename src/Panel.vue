@@ -206,7 +206,7 @@ const handleOptimize = async () => {
   }
   (toastr as any).info('正在发送给AI进行优化...');
   try {
-    const result = await optimizeText(optimizedContent.value, settings.value.promptSettings[activePrompt.value]);
+    const result = await optimizeText(optimizedContent.value, settings.value.promptSettings[activePrompt.value], lastCharMessageContent.value);
     if (result !== null) {
       optimizedResult.value = result;
       (toastr as any).success('优化完成。');
@@ -269,7 +269,7 @@ const handleFullAutoOptimize = async () => {
     (toastr as any).success('句子提取成功，正在发送给AI优化...');
 
     // 步骤 2: 发送给AI进行优化
-    const optimizedResultText = await optimizeText(sourceContent, settings.value.promptSettings[activePrompt.value]);
+    const optimizedResultText = await optimizeText(sourceContent, settings.value.promptSettings[activePrompt.value], lastCharMessageContent.value);
     
     // 如果用户取消了优化，则中止整个流程
     if (optimizedResultText === null) {
