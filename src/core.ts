@@ -112,7 +112,7 @@ async function onGenerationEnded(messageId: number) {
       const sourceContent = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
 
       showToast('success', '句子提取成功，正在发送给AI优化...');
-      const optimizedResultText = await getOptimizedText(sourceContent);
+      const optimizedResultText = await getOptimizedText(sourceContent, latestMessage.message);
       if (optimizedResultText === null) {
         // Optimization was aborted or failed, message already shown.
         return;
@@ -472,19 +472,63 @@ function getSystemPrompt(): string {
     .split(',')
     .map((w: string) => w.trim())
     .filter(Boolean);
-  const { main, system, final_system } = settings.promptSettings;
+  // Safeguard against missing promptSettings
+  const { main, system, final_system } = settings.promptSettings || {};
 
   return [main, system, `必须避免使用这些词：[${disabledWords.join(', ')}]`, final_system].filter(Boolean).join('\n');
 }
 
-async function getOptimizedText(textToOptimize: string): Promise<string | null> {
-  const systemPrompt = getSystemPrompt();
+async function getOptimizedText(textToOptimize: string, lastCharMessageText?: string): Promise<string | null> {
+  let processedPrompt = getSystemPrompt();
+  let userContent = `待优化句子：\n${textToOptimize}`;
+
+  // Unified logic for handling context, now used by both auto and manual optimization
+  if (lastCharMessageText && processedPrompt.includes('{{charpuremessage}}')) {
+    let contextText = cleanTextWithRegex(lastCharMessageText);
+    const sentencesToOptimize = textToOptimize
+      .split('\n')
+      .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
+      .filter(Boolean);
+
+    sentencesToOptimize.forEach(sentence => {
+      const escapedSentence = sentence.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      const regex = new RegExp(escapedSentence, 'g');
+      contextText = contextText.replace(regex, `[START OPTIMIZE]${sentence}[END OPTIMIZE]`);
+    });
+
+    processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, contextText);
+    userContent = `请根据下面的剧本原文的上下文，对句子进行修改，去除禁用词，新句子不要使用禁词禁句。被 \`[START OPTIMIZE]\` 和 \`[END OPTIMIZE]\` 标记内的句子是被提取的句子，必须结合前后文进行优化修改。你只能按照格式输出修改后的句子，并保持原来的编号。 
+输出格式规则:
+你的回复【必须只包含】改写后的句子，并保持原始编号。
+【严禁】任何多余的文字，包括但不限于：解释、建议、标题、前言、对话或任何Markdown格式。
+【严禁】为每个句子提供多个优化选项。只提供一个你认为最佳的改写版本。
+示例:
+输入:
+1. 他跑得很快。
+
+正确输出:
+1. 他如疾风般掠过。
+
+错误输出 (任何类似以下的格式都将被视为失败):
+- 优化建议：他如疾风般掠过。
+
+你的任务是直接修改句子，而不是提供修改建议让用户选择。你应该仅按格式输出修改完成的句子，不要输出其他内容。`;
+  }
+
   const messages = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: `待优化句子：\n${textToOptimize}` },
+    { role: 'system', content: processedPrompt },
+    { role: 'user', content: userContent },
   ];
 
+  console.log('--- Sending to AI for Optimization ---');
+  console.log('Prompt:', processedPrompt);
+  console.log('User Content:', userContent);
+  console.log('Original sentences to optimize:', textToOptimize);
+  console.log('------------------------------------');
+
   const result = await callAI(messages);
+
+  console.log('处理完成');
 
   return result;
 }
@@ -797,50 +841,11 @@ function cleanTextWithRegex(text: string): string {
  */
 export async function optimizeText(
   textToOptimize: string,
-  prompt: string,
+  prompt: string, // This parameter is kept for API compatibility but is now ignored.
   lastCharMessageText: string,
 ): Promise<string | null> {
-  let processedPrompt = prompt;
-  let userContent = `待优化句子：\n${textToOptimize}`; // 默认用户内容
-
-  if (processedPrompt.includes('{{charpuremessage}}')) {
-    // 1. 清理完整的原始消息
-    let contextText = cleanTextWithRegex(lastCharMessageText);
-    
-    // 2. 获取所有待优化的独立句子
-    const sentencesToOptimize = textToOptimize.split('\n').map(s => s.replace(/^\d+[.)]\s*/, '').trim()).filter(Boolean);
-
-    // 3. 在上下文中标记这些句子
-    sentencesToOptimize.forEach(sentence => {
-      // 需要对句子中的特殊正则字符进行转义，以确保替换的准确性
-      const escapedSentence = sentence.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(escapedSentence, 'g');
-      contextText = contextText.replace(regex, `[START OPTIMIZE]${sentence}[END OPTIMIZE]`);
-    });
-
-    // 4. 将处理后的上下文替换到提示词中
-    processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, contextText);
-
-    // 5. 更新用户内容为您指定的引导性文本
-    userContent = '请根据下面的剧本上下文，对句子进行优化。被 `[START OPTIMIZE]` 和 `[END OPTIMIZE]` 标记内的句子是被提取的句子，必须结合前后文进行优化。请只返回优化后的句子，并保持原来的编号。';
-  }
-
-  const messages = [
-    { role: 'system', content: processedPrompt },
-    { role: 'user', content: userContent },
-  ];
-
-  console.log('--- Sending to AI for Optimization ---');
-  console.log('Prompt:', processedPrompt);
-  console.log('User Content:', userContent);
-  console.log('Original sentences to optimize:', textToOptimize);
-  console.log('------------------------------------');
-
-  const result = await callAI(messages);
-
-  console.log('处理完成');
-
-  return result;
+  // This function is now a simple wrapper around the unified getOptimizedText function.
+  return getOptimizedText(textToOptimize, lastCharMessageText);
 }
 
 /**
