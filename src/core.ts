@@ -100,9 +100,9 @@ async function onGenerationEnded(messageId: number) {
 
     // 自动优化流程
     try {
-      showToast('info', '检测到禁用词，自动优化流程已启动...');
+      showToast('info', '检测到禁用词或句式，自动优化流程已启动...');
       // 注意：这里我们从清理后的消息中提取句子
-      const sentences = extractSentencesWithWords(cleanedMessage, disabledWords);
+      const sentences = extractSentencesWithRules(cleanedMessage, settings);
       if (sentences.length === 0) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
@@ -132,26 +132,42 @@ async function onGenerationEnded(messageId: number) {
 }
 
 /**
- * 检查消息中是否包含禁用词（先清理后检查）。
+ * 检查消息中是否包含禁用词或匹配句式模板（先清理后检查）。
  * @param messageText 要检查的消息文本。
- * @returns 如果找到禁用词则返回 true，否则返回 false。
+ * @returns 如果找到则返回 true，否则返回 false。
  */
 export function checkMessageForDisabledWords(messageText: string): boolean {
   const settings = getPluginSettings();
   const cleanedMessage = cleanTextWithRegex(messageText);
+
+  // 检查禁用词
   const disabledWords = (settings.disabledWords || '')
     .split(',')
     .map((w: string) => w.trim())
     .filter(Boolean);
-
-  if (disabledWords.length === 0) {
-    return false;
-  }
-
-  return disabledWords.some(word => {
+  if (disabledWords.some(word => {
     const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
     return new RegExp(escapedWord, 'i').test(cleanedMessage);
-  });
+  })) {
+    return true;
+  }
+
+  // 检查句式模板
+  const patterns = settings.sentencePatterns || [];
+  if (patterns.some(pattern => {
+    if (!pattern.enabled || !pattern.valueA) return false;
+    try {
+      const regex = buildRegexFromPattern(pattern);
+      return regex.test(cleanedMessage);
+    } catch (e) {
+      console.error(`[AI Optimizer] Invalid pattern`, pattern, e);
+      return false;
+    }
+  })) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
@@ -188,7 +204,7 @@ async function showOptimizationPopup(originalMessage: any, foundWords: string[],
 
   const sentencesToOptimize = isManual
     ? [originalMessage.message]
-    : extractSentencesWithWords(originalMessage.message, foundWords);
+    : extractSentencesWithRules(originalMessage.message, settings);
 
   if (sentencesToOptimize.length === 0) {
     // (toastr as any).info('在消息中未找到包含禁用词的句子。');
@@ -533,51 +549,85 @@ async function getOptimizedText(textToOptimize: string, lastCharMessageText?: st
   return result;
 }
 
+function escapeRegex(string: string) {
+  return string.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+}
+
+function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): RegExp {
+  const { type, valueA, valueB } = pattern;
+  const escapedA = escapeRegex(valueA);
+
+  switch (type) {
+    case 'contains':
+      return new RegExp(escapedA, 'i');
+    case 'startsWith':
+      return new RegExp(`^${escapedA}`, 'i');
+    case 'endsWith':
+      return new RegExp(`${escapedA}$`, 'i');
+    case 'patternAB': {
+      const escapedB = valueB ? escapeRegex(valueB) : '';
+      return new RegExp(`${escapedA}.*?${escapedB}`, 'i');
+    }
+    default:
+      throw new Error(`Unknown pattern type: ${type}`);
+  }
+}
+
+
 /**
- * 从文本中提取包含指定单词的句子。
+ * 从文本中提取包含禁用词或匹配句式模板的句子。
  * @param text 全文。
- * @param words 要查找的单词数组。
+ * @param settings 插件设置。
  */
-function extractSentencesWithWords(text: string, words: string[]): string[] {
-  // 首先，剥离所有HTML标签，以避免<br>等标签的干扰。
+function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
-  // 改进的正则表达式，能更好地处理中英文标点，并在找不到标点时将整个文本视为一个句子。
   const sentences = plainText.match(/[^.!?。！？]+[.!?。！？]?/g) || [plainText];
   const uniqueSentences = new Set<string>();
 
-  words.forEach(word => {
-    // 创建一个对特殊字符进行转义的正则表达式
-    const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    const regex = new RegExp(escapedWord, 'i');
+  const cleanup = (sentence: string) => {
+    let cleaned = sentence.replace(/[\r\n]/g, ' ').trim();
+    cleaned = cleaned.replace(/\*/g, '');
+    cleaned = cleaned.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
+    const ellipsisIndex = cleaned.lastIndexOf('……');
+    if (ellipsisIndex !== -1 && ellipsisIndex + 2 < cleaned.length) {
+      cleaned = cleaned.substring(ellipsisIndex + 2);
+    }
+    cleaned = cleaned.replace(/^[\s"'“‘]+/, '').trim();
+    cleaned = cleaned.replace(/^[^\p{L}\p{N}]+/u, '').trim();
+    return cleaned;
+  };
+
+  // 1. 提取包含禁用词的句子
+  const disabledWords = (settings.disabledWords || '')
+    .split(',')
+    .map((w: string) => w.trim())
+    .filter(Boolean);
+
+  if (disabledWords.length > 0) {
+    const disabledWordRegex = new RegExp(disabledWords.map(escapeRegex).join('|'), 'i');
     sentences.forEach(sentence => {
-      if (regex.test(sentence)) {
-        // 移除换行符
-        let cleanedSentence = sentence.replace(/[\r\n]/g, ' ').trim();
-
-        // 移除所有星号
-        cleanedSentence = cleanedSentence.replace(/\*/g, '');
-
-        // 移除句子开头和结尾的引号和空格
-        cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
-
-        // 如果句子中包含 "……"，则只取最后一个 "……" 之后的部分
-        const ellipsisIndex = cleanedSentence.lastIndexOf('……');
-        if (ellipsisIndex !== -1) {
-          // 确保 "……" 后面有内容
-          if (ellipsisIndex + 2 < cleanedSentence.length) {
-            cleanedSentence = cleanedSentence.substring(ellipsisIndex + 2);
-          }
-        }
-
-        // 再次移除可能出现的前导引号
-        cleanedSentence = cleanedSentence.replace(/^[\s"'“‘]+/, '').trim();
-
-        // 根据新规则：移除所有非字母、非数字开头的字符，以确保句子以文本开始
-        cleanedSentence = cleanedSentence.replace(/^[^\p{L}\p{N}]+/u, '').trim();
-
-        uniqueSentences.add(cleanedSentence);
+      if (disabledWordRegex.test(sentence)) {
+        const cleaned = cleanup(sentence);
+        if(cleaned) uniqueSentences.add(cleaned);
       }
     });
+  }
+
+  // 2. 提取匹配句式模板的句子
+  const patterns = settings.sentencePatterns || [];
+  patterns.forEach(pattern => {
+    if (!pattern.enabled || !pattern.valueA) return;
+    try {
+      const regex = buildRegexFromPattern(pattern);
+      sentences.forEach(sentence => {
+        if (regex.test(sentence)) {
+          const cleaned = cleanup(sentence);
+          if(cleaned) uniqueSentences.add(cleaned);
+        }
+      });
+    } catch (e) {
+      console.error(`[AI Optimizer] Invalid pattern`, pattern, e);
+    }
   });
 
   return Array.from(uniqueSentences);
@@ -776,7 +826,7 @@ export function manualOptimize(callback: (content: string) => void) {
   }
 
   // 步骤 2: 在清理后的文本中提取句子
-  const sentences = extractSentencesWithWords(cleanedMessage, disabledWords);
+  const sentences = extractSentencesWithRules(cleanedMessage, settings);
 
   if (sentences.length > 0) {
     showToast('success', '已提取待优化内容。');

@@ -41,7 +41,12 @@
         </div>
         <div class="block">
           <label>{{ t`API URL` }}</label>
-          <input v-model="settings.apiUrl" class="text_pole" type="text" :placeholder="t`例如: https://api.openai.com/v1`" />
+          <input
+            v-model="settings.apiUrl"
+            class="text_pole"
+            type="text"
+            :placeholder="t`例如: https://api.openai.com/v1`"
+          />
         </div>
         <div class="block">
           <label>{{ t`API 密钥` }}</label>
@@ -50,8 +55,8 @@
         <div class="button-group">
           <button class="menu_button" @click="handleTestConnection">{{ t`测试连接` }}</button>
           <button class="menu_button" @click="fetchModels">{{ t`获取模型` }}</button>
-          <span v-if="connectionStatus === 'success'" style="color: green;">{{ t`连接成功！` }}</span>
-          <span v-if="connectionStatus === 'error'" style="color: red;">{{ t`连接失败。` }}</span>
+          <span v-if="connectionStatus === 'success'" style="color: green">{{ t`连接成功！` }}</span>
+          <span v-if="connectionStatus === 'error'" style="color: red">{{ t`连接失败。` }}</span>
         </div>
         <div class="block">
           <label>{{ t`模型名称` }}</label>
@@ -77,6 +82,31 @@
           <label>{{ t`禁用词列表 (用英文逗号 , 分隔)` }}</label>
           <textarea v-model="settings.disabledWords" class="text_pole" rows="3"></textarea>
         </div>
+
+        <hr class="sysHR" />
+
+        <!-- 句式模板 -->
+        <b>{{ t`句式模板规则` }}</b>
+        <div class="block">
+          <div v-for="(pattern, index) in settings.sentencePatterns" :key="pattern.id" class="pattern-rule">
+            <label class="checkbox_label">
+              <input v-model="pattern.enabled" type="checkbox" />
+            </label>
+            <select v-model="pattern.type" class="text_pole pattern-type">
+              <option value="contains">{{ t`包含` }}</option>
+              <option value="startsWith">{{ t`以...开头` }}</option>
+              <option value="endsWith">{{ t`以...结尾` }}</option>
+              <option value="patternAB">{{ t`A...B模式` }}</option>
+            </select>
+            <input v-model="pattern.valueA" class="text_pole pattern-value" :placeholder="t`关键词A`" />
+            <input v-if="pattern.type === 'patternAB'" v-model="pattern.valueB" class="text_pole pattern-value" :placeholder="t`关键词B`" />
+            <button class="menu_button" @click="removePattern(index)">{{ t`删除` }}</button>
+          </div>
+          <div class="button-group">
+            <button class="menu_button" @click="addPattern">{{ t`添加新规则` }}</button>
+          </div>
+        </div>
+
         <div class="block">
           <label>{{ t`正则表达式过滤器 (每行一个)` }}</label>
           <textarea v-model="settings.regexFilters" class="text_pole" rows="5"></textarea>
@@ -143,7 +173,17 @@ import CustomSlider from '@/components/CustomSlider.vue';
 import { useSettingsStore } from '@/store/settings';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, ref, watch } from 'vue';
-import { fetchModelsFromApi, testApiConnection, manualOptimize, optimizeText, replaceMessage, getLastCharMessage, checkMessageForDisabledWords, abortOptimization } from '@/core';
+import {
+  fetchModelsFromApi,
+  testApiConnection,
+  manualOptimize,
+  optimizeText,
+  replaceMessage,
+  getLastCharMessage,
+  checkMessageForDisabledWords,
+  abortOptimization,
+} from '@/core';
+import { v4 as uuidv4 } from 'uuid';
 
 const { settings } = storeToRefs(useSettingsStore());
 const modelList = ref<string[]>([]);
@@ -170,18 +210,31 @@ watch(lastCharMessageContent, (newMessage, oldMessage) => {
   }
 });
 
+const addPattern = () => {
+  if (!Array.isArray(settings.value.sentencePatterns)) {
+    settings.value.sentencePatterns = [];
+  }
+  settings.value.sentencePatterns.push({
+    id: uuidv4(),
+    type: 'contains',
+    valueA: '',
+    valueB: '',
+    enabled: true,
+  });
+};
+
+const removePattern = (index: number) => {
+  settings.value.sentencePatterns.splice(index, 1);
+};
+
 const handleReplaceMessage = () => {
   if (!optimizedContent.value || !optimizedResult.value) {
     (toastr as any).warning('“待优化内容”和“优化后内容”都不能为空。');
     return;
   }
-  replaceMessage(
-    optimizedContent.value,
-    optimizedResult.value,
-    (newContent: string) => {
-      modifiedMessage.value = newContent;
-    },
-  );
+  replaceMessage(optimizedContent.value, optimizedResult.value, (newContent: string) => {
+    modifiedMessage.value = newContent;
+  });
 };
 
 const handleExtractSentences = () => {
@@ -206,7 +259,11 @@ const handleOptimize = async () => {
   }
   (toastr as any).info('正在发送给AI进行优化...');
   try {
-    const result = await optimizeText(optimizedContent.value, settings.value.promptSettings[activePrompt.value], lastCharMessageContent.value);
+    const result = await optimizeText(
+      optimizedContent.value,
+      settings.value.promptSettings[activePrompt.value],
+      lastCharMessageContent.value,
+    );
     if (result !== null) {
       optimizedResult.value = result;
       (toastr as any).success('优化完成。');
@@ -253,7 +310,7 @@ const handleFullAutoOptimize = async () => {
     (toastr as any).info('自动化优化流程已启动...');
 
     // 步骤 1: 提取待优化内容
-    const sourceContent: string = await new Promise((resolve) => {
+    const sourceContent: string = await new Promise(resolve => {
       manualOptimize((content: string) => {
         resolve(content);
       });
@@ -269,14 +326,18 @@ const handleFullAutoOptimize = async () => {
     (toastr as any).success('句子提取成功，正在发送给AI优化...');
 
     // 步骤 2: 发送给AI进行优化
-    const optimizedResultText = await optimizeText(sourceContent, settings.value.promptSettings[activePrompt.value], lastCharMessageContent.value);
-    
+    const optimizedResultText = await optimizeText(
+      sourceContent,
+      settings.value.promptSettings[activePrompt.value],
+      lastCharMessageContent.value,
+    );
+
     // 如果用户取消了优化，则中止整个流程
     if (optimizedResultText === null) {
       console.log('[Auto Optimizer] 优化被用户取消，流程中止。');
       return;
     }
-    
+
     if (!optimizedResultText) {
       throw new Error('AI 未能返回优化后的文本。');
     }
@@ -284,14 +345,13 @@ const handleFullAutoOptimize = async () => {
     (toastr as any).success('AI优化完成，正在执行替换...');
 
     // 步骤 3: 执行替换
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       replaceMessage(sourceContent, optimizedResultText, (newContent: string) => {
         modifiedMessage.value = newContent; // 更新UI上的测试文本框
         resolve();
       });
     });
     (toastr as any).success('替换完成！流程结束。', '成功', { timeOut: 5000 });
-
   } catch (error: any) {
     // AbortError should be caught in callAI, so we only handle other errors here.
     console.error('[Auto Optimizer] 流程执行出错:', error);
@@ -367,5 +427,18 @@ onUnmounted(() => {
 }
 .menu_button {
   white-space: nowrap;
+}
+.pattern-rule {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.pattern-type {
+  flex-basis: 120px;
+  flex-shrink: 0;
+}
+.pattern-value {
+  flex-grow: 1;
 }
 </style>
