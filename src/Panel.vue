@@ -86,26 +86,33 @@
         <hr class="sysHR" />
 
         <!-- 句式模板 -->
-        <b>{{ t`句式模板规则` }}</b>
-        <div class="block">
-          <div v-for="(pattern, index) in settings.sentencePatterns" :key="pattern.id" class="pattern-rule">
-            <label class="checkbox_label">
-              <input v-model="pattern.enabled" type="checkbox" />
-            </label>
-            <select v-model="pattern.type" class="text_pole pattern-type">
-              <option value="contains">{{ t`包含` }}</option>
-              <option value="startsWith">{{ t`以...开头` }}</option>
-              <option value="endsWith">{{ t`以...结尾` }}</option>
-              <option value="patternAB">{{ t`A...B模式` }}</option>
-            </select>
-            <input v-model="pattern.valueA" class="text_pole pattern-value" :placeholder="t`关键词A`" />
-            <input v-if="pattern.type === 'patternAB'" v-model="pattern.valueB" class="text_pole pattern-value" :placeholder="t`关键词B`" />
-            <button class="menu_button" @click="removePattern(index)">{{ t`删除` }}</button>
+        <details open>
+          <summary><b>{{ t`句式模板规则` }}</b></summary>
+          <div class="block">
+            <div v-for="(pattern, index) in settings.sentencePatterns" :key="pattern.id" class="pattern-rule">
+              <label class="checkbox_label">
+                <input v-model="pattern.enabled" type="checkbox" />
+              </label>
+              <select v-model="pattern.type" class="text_pole pattern-type">
+                <option value="contains">{{ t`包含` }}</option>
+                <option value="startsWith">{{ t`以...开头` }}</option>
+                <option value="endsWith">{{ t`以...结尾` }}</option>
+                <option value="patternAB">{{ t`A...B模式` }}</option>
+              </select>
+              <input v-model="pattern.valueA" class="text_pole pattern-value" :placeholder="t`关键词A`" />
+              <input
+                v-if="pattern.type === 'patternAB'"
+                v-model="pattern.valueB"
+                class="text_pole pattern-value"
+                :placeholder="t`关键词B`"
+              />
+              <button class="menu_button" @click="removePattern(index)">{{ t`删除` }}</button>
+            </div>
+            <div class="button-group">
+              <button class="menu_button" @click="addPattern">{{ t`添加新规则` }}</button>
+            </div>
           </div>
-          <div class="button-group">
-            <button class="menu_button" @click="addPattern">{{ t`添加新规则` }}</button>
-          </div>
-        </div>
+        </details>
 
         <div class="block">
           <label>{{ t`正则表达式过滤器 (每行一个)` }}</label>

@@ -576,18 +576,32 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
 
 /**
  * 从文本中提取包含禁用词或匹配句式模板的句子。
+ * 如果找到的句子少于10个字符，则会自动包含其前后句子。
  * @param text 全文。
  * @param settings 插件设置。
  */
 function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
-  const sentences = plainText.match(/[^.!?。！？]+[.!?。！？]?/g) || [plainText];
-  const uniqueSentences = new Set<string>();
+  // 1. 更可靠地分割句子，同时保留分隔符
+  const parts = plainText.split(/([.!?。！？])/g);
+  const sentences_temp: string[] = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const textPart = parts[i];
+    const delimiter = parts[i + 1] || '';
+    if (textPart || delimiter) {
+      sentences_temp.push(textPart + delimiter);
+    }
+  }
+  const sentences = sentences_temp.map(s => s.trim()).filter(s => s.length > 0);
+  if (sentences.length === 0 && plainText.trim().length > 0) {
+    sentences.push(plainText.trim());
+  }
 
-  const cleanup = (sentence: string) => {
+  // 2. 定义一个“温和”的清理函数，它不会移除引号
+  const gentleCleanup = (sentence: string) => {
+    if (!sentence) return '';
     let cleaned = sentence.replace(/[\r\n]/g, ' ').trim();
     cleaned = cleaned.replace(/\*/g, '');
-    cleaned = cleaned.replace(/^[\s"'“‘]+|[\s"'”’]+$/g, '').trim();
     const ellipsisIndex = cleaned.lastIndexOf('……');
     if (ellipsisIndex !== -1 && ellipsisIndex + 2 < cleaned.length) {
       cleaned = cleaned.substring(ellipsisIndex + 2);
@@ -597,36 +611,84 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
     return cleaned;
   };
 
-  // 1. 提取包含禁用词的句子
+  // 3. 准备匹配规则
   const disabledWords = (settings.disabledWords || '')
     .split(',')
     .map((w: string) => w.trim())
     .filter(Boolean);
+  const disabledWordRegex =
+    disabledWords.length > 0 ? new RegExp(disabledWords.map(escapeRegex).join('|'), 'i') : null;
 
-  if (disabledWords.length > 0) {
-    const disabledWordRegex = new RegExp(disabledWords.map(escapeRegex).join('|'), 'i');
-    sentences.forEach(sentence => {
-      if (disabledWordRegex.test(sentence)) {
-        const cleaned = cleanup(sentence);
-        if(cleaned) uniqueSentences.add(cleaned);
+  const patterns = (settings.sentencePatterns || []).filter(p => p.enabled && p.valueA);
+  const patternRegexes = patterns
+    .map(p => {
+      try {
+        return buildRegexFromPattern(p);
+      } catch (e) {
+        console.error(`[AI Optimizer] Invalid pattern`, p, e);
+        return null;
       }
-    });
+    })
+    .filter((p): p is RegExp => p !== null);
+
+  // 4. 查找所有匹配规则的句子索引
+  const matchingIndices = new Set<number>();
+  sentences.forEach((sentence, index) => {
+    if (disabledWordRegex && disabledWordRegex.test(sentence)) {
+      matchingIndices.add(index);
+    }
+    for (const regex of patternRegexes) {
+      if (regex.test(sentence)) {
+        matchingIndices.add(index);
+        break;
+      }
+    }
+  });
+
+  if (matchingIndices.size === 0) {
+    return [];
   }
 
-  // 2. 提取匹配句式模板的句子
-  const patterns = settings.sentencePatterns || [];
-  patterns.forEach(pattern => {
-    if (!pattern.enabled || !pattern.valueA) return;
-    try {
-      const regex = buildRegexFromPattern(pattern);
-      sentences.forEach(sentence => {
-        if (regex.test(sentence)) {
-          const cleaned = cleanup(sentence);
-          if(cleaned) uniqueSentences.add(cleaned);
-        }
-      });
-    } catch (e) {
-      console.error(`[AI Optimizer] Invalid pattern`, pattern, e);
+  // 5. 为短句子扩展上下文
+  const finalIndices = new Set<number>();
+  matchingIndices.forEach(index => {
+    finalIndices.add(index);
+    // 仅在检查长度时移除引号
+    const lengthCheckSentence = (sentences[index] || '').replace(/["'“‘”’]/g, '');
+    if (lengthCheckSentence.length < 10) {
+      if (index > 0) {
+        finalIndices.add(index - 1);
+      }
+      if (index < sentences.length - 1) {
+        finalIndices.add(index + 1);
+      }
+    }
+  });
+
+  // 6. 将连续的句子索引分组
+  const sortedIndices = Array.from(finalIndices).sort((a, b) => a - b);
+  if (sortedIndices.length === 0) {
+    return [];
+  }
+  const groups: number[][] = [];
+  let currentGroup: number[] = [sortedIndices[0]];
+  for (let i = 1; i < sortedIndices.length; i++) {
+    if (sortedIndices[i] === sortedIndices[i - 1] + 1) {
+      currentGroup.push(sortedIndices[i]);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [sortedIndices[i]];
+    }
+  }
+  groups.push(currentGroup);
+
+  // 7. 合并并使用“温和”的清理函数处理最终的句子
+  const uniqueSentences = new Set<string>();
+  groups.forEach(group => {
+    const combinedSentence = group.map(index => sentences[index]).join(' ');
+    const cleaned = gentleCleanup(combinedSentence);
+    if (cleaned) {
+      uniqueSentences.add(cleaned);
     }
   });
 
