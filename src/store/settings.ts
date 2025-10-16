@@ -2,12 +2,18 @@ import { setting_field, Settings } from '@/type/settings';
 import { validateInplace } from '@/util/zod';
 import { saveSettingsDebounced } from '@sillytavern/script';
 import { extension_settings } from '@sillytavern/scripts/extensions';
+<<<<<<< HEAD
 import { defineStore } from 'pinia';
 import { ref, watch, toRaw } from 'vue';
 import _ from 'lodash';
 
 export const useSettingsStore = defineStore('settings', () => {
   const settings = ref(validateInplace(Settings, _.get(extension_settings, setting_field, {})));
+=======
+
+export const useSettingsStore = defineStore('settings', () => {
+  const settings = ref(validateInplace(Settings, _.get(extension_settings, setting_field)));
+>>>>>>> d4c8a8439aa6a87f3dc78db9c12355056842257a
 
   watch(
     settings,
