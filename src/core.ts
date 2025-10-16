@@ -592,26 +592,12 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
       sentences_temp.push(textPart + delimiter);
     }
   }
-  const sentences = sentences_temp.map(s => s.trim()).filter(s => s.length > 0);
+  const sentences = sentences_temp.filter(s => s.trim().length > 0);
   if (sentences.length === 0 && plainText.trim().length > 0) {
     sentences.push(plainText.trim());
   }
 
-  // 2. 定义一个“温和”的清理函数，它不会移除引号
-  const gentleCleanup = (sentence: string) => {
-    if (!sentence) return '';
-    let cleaned = sentence.replace(/[\r\n]/g, ' ').trim();
-    cleaned = cleaned.replace(/\*/g, '');
-    const ellipsisIndex = cleaned.lastIndexOf('……');
-    if (ellipsisIndex !== -1 && ellipsisIndex + 2 < cleaned.length) {
-      cleaned = cleaned.substring(ellipsisIndex + 2);
-    }
-    cleaned = cleaned.replace(/^[\s"'“‘]+/, '').trim();
-    cleaned = cleaned.replace(/^[^\p{L}\p{N}]+/u, '').trim();
-    return cleaned;
-  };
-
-  // 3. 准备匹配规则
+  // 2. 准备匹配规则
   const disabledWords = (settings.disabledWords || '')
     .split(',')
     .map((w: string) => w.trim())
@@ -634,11 +620,12 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   // 4. 查找所有匹配规则的句子索引
   const matchingIndices = new Set<number>();
   sentences.forEach((sentence, index) => {
-    if (disabledWordRegex && disabledWordRegex.test(sentence)) {
+    const trimmedSentence = sentence.trim();
+    if (disabledWordRegex && disabledWordRegex.test(trimmedSentence)) {
       matchingIndices.add(index);
     }
     for (const regex of patternRegexes) {
-      if (regex.test(sentence)) {
+      if (regex.test(trimmedSentence)) {
         matchingIndices.add(index);
         break;
       }
@@ -653,8 +640,8 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const finalIndices = new Set<number>();
   matchingIndices.forEach(index => {
     finalIndices.add(index);
-    // 仅在检查长度时移除引号
-    const lengthCheckSentence = (sentences[index] || '').replace(/["'“‘”’]/g, '');
+    // 仅在检查长度时移除引号和空格
+    const lengthCheckSentence = (sentences[index] || '').trim().replace(/["'“‘”’]/g, '');
     if (lengthCheckSentence.length < 10) {
       if (index > 0) {
         finalIndices.add(index - 1);
@@ -682,13 +669,13 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   }
   groups.push(currentGroup);
 
-  // 7. 合并并使用“温和”的清理函数处理最终的句子
+  // 7. 合并并处理最终的句子
   const uniqueSentences = new Set<string>();
   groups.forEach(group => {
-    const combinedSentence = group.map(index => sentences[index]).join(' ');
-    const cleaned = gentleCleanup(combinedSentence);
-    if (cleaned) {
-      uniqueSentences.add(cleaned);
+    // 通过 join('') 更精确地重建句子块，然后 trim
+    const combinedSentence = group.map(index => sentences[index]).join('').trim();
+    if (combinedSentence) {
+      uniqueSentences.add(combinedSentence);
     }
   });
 
