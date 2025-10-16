@@ -572,8 +572,9 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
  */
 function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
-  // 1. Split by sentence-ending punctuation, keeping the delimiters.
-  const parts = plainText.split(/([.!?。！？])/g);
+  // 1. Split by sentence-ending punctuation and any trailing quotes/spaces, keeping the delimiters.
+  // This regex is designed to prevent stray punctuation like "]" or "”" from starting a new "sentence".
+  const parts = plainText.split(/([.!?。！？](?:["'“‘”’\])}`]|\s)*)/g);
   const sentences_temp: string[] = [];
   if (parts.length > 1) {
     for (let i = 0; i < parts.length; i += 2) {
