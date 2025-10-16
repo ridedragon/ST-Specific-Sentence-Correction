@@ -501,34 +501,24 @@ async function getOptimizedText(textToOptimize: string, lastCharMessageText?: st
   // Unified logic for handling context, now used by both auto and manual optimization
   if (lastCharMessageText && processedPrompt.includes('{{charpuremessage}}')) {
     let contextText = cleanTextWithRegex(lastCharMessageText);
-    const sentencesToOptimize = textToOptimize
-      .split('\n')
-      .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
-      .filter(Boolean);
-
-    sentencesToOptimize.forEach(sentence => {
-      const escapedSentence = sentence.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-      const regex = new RegExp(escapedSentence, 'g');
-      contextText = contextText.replace(regex, `[START OPTIMIZE]${sentence}[END OPTIMIZE]`);
-    });
-
     processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, contextText);
-    userContent = `请根据下面的剧本原文的上下文，对句子进行修改，去除禁用词，新句子不要使用禁词禁句。被 \`[START OPTIMIZE]\` 和 \`[END OPTIMIZE]\` 标记内的句子是被提取的句子，必须结合前后文进行优化修改。你只能按照格式输出修改后的句子，并保持原来的编号。 
-输出格式规则:
-你的回复【必须只包含】改写后的句子，并保持原始编号。
-【严禁】任何多余的文字，包括但不限于：解释、建议、标题、前言、对话或任何Markdown格式。
-【严禁】为每个句子提供多个优化选项。只提供一个你认为最佳的改写版本。
-示例:
-输入:
-1. 他跑得很快。
+    const sentenceCount = textToOptimize.split('\n').filter(Boolean).length;
+    userContent = `你是一个专业的文本优化师。你的任务是根据用户提供的上下文，对指定的句子进行优化。
+【绝对规则】:
+1.  **数量必须完全一致**: 用户提供了 ${sentenceCount} 个待优化的句子，你的回复【必须】不多不少，正好是 ${sentenceCount} 个优化后的句子。
+2.  **格式必须严格遵守**: 你的回复【只能】包含带编号的句子列表，每个句子占一行。
+3.  **内容必须纯净**: 【严禁】在回复中包含任何除了编号和句子之外的额外内容，例如“好的”、“优化如下”、“解释”、“注释”或任何Markdown格式。
+4.  **一一对应**: 每个优化后的句子都必须与原始的编号项一一对应。不要合并或拆分句子。
 
-正确输出:
-1. 他如疾风般掠过。
+【上下文】:
+\`\`\`
+${contextText}
+\`\`\`
 
-错误输出 (任何类似以下的格式都将被视为失败):
-- 优化建议：他如疾风般掠过。
+【待优化句子】 (共 ${sentenceCount} 项):
+${textToOptimize}
 
-你的任务是直接修改句子，而不是提供修改建议让用户选择。你应该仅按格式输出修改完成的句子，不要输出其他内容。`;
+请严格按照上述规则，对【待优化句子】中的每一项进行优化，并仅返回纯净的、编号数量完全一致的结果。`;
   }
 
   const messages = [
@@ -582,19 +572,27 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
  */
 function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
-  // 1. 更可靠地分割句子，同时保留分隔符
+  // 1. Split by sentence-ending punctuation, keeping the delimiters.
   const parts = plainText.split(/([.!?。！？])/g);
   const sentences_temp: string[] = [];
-  for (let i = 0; i < parts.length; i += 2) {
-    const textPart = parts[i];
-    const delimiter = parts[i + 1] || '';
-    if (textPart || delimiter) {
-      sentences_temp.push(textPart + delimiter);
+  if (parts.length > 1) {
+    for (let i = 0; i < parts.length; i += 2) {
+      const sentencePart = parts[i] || '';
+      const delimiter = parts[i + 1] || '';
+      sentences_temp.push(sentencePart + delimiter);
     }
+  } else if (plainText.trim().length > 0) {
+    sentences_temp.push(plainText);
   }
-  const sentences = sentences_temp.filter(s => s.trim().length > 0);
+
+  // 2. Filter out parts that don't contain any letters or numbers.
+  const hasContentRegex = /[\p{L}\p{N}]/u;
+  const sentences = sentences_temp.filter(s => hasContentRegex.test(s));
+
+  // If, after filtering, we have nothing, but the original text was not empty,
+  // it means the text might be a single block without standard punctuation.
   if (sentences.length === 0 && plainText.trim().length > 0) {
-    sentences.push(plainText.trim());
+    return [plainText.trim()];
   }
 
   // 2. 准备匹配规则
@@ -669,17 +667,22 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   }
   groups.push(currentGroup);
 
-  // 7. 合并并处理最终的句子
-  const uniqueSentences = new Set<string>();
+  // 7. 合并并处理最终的句子，保留顺序
+  const finalSentences: string[] = [];
+  const processedIndices = new Set<number>();
   groups.forEach(group => {
-    // 通过 join('') 更精确地重建句子块，然后 trim
-    const combinedSentence = group.map(index => sentences[index]).join('').trim();
-    if (combinedSentence) {
-      uniqueSentences.add(combinedSentence);
+    if (group.some(index => processedIndices.has(index))) {
+      return;
+    }
+    // Join the original sentence parts and then trim the final block.
+    const combinedSentence = group.map(index => sentences[index]).join('');
+    if (combinedSentence.trim()) {
+      finalSentences.push(combinedSentence.trim());
+      group.forEach(index => processedIndices.add(index));
     }
   });
 
-  return Array.from(uniqueSentences);
+  return finalSentences;
 }
 
 // Helper to get request headers for SillyTavern API
