@@ -101,18 +101,21 @@ async function onGenerationEnded(messageId: number) {
     // 自动优化流程
     try {
       showToast('info', '检测到禁用词或句式，自动优化流程已启动...');
-      // 注意：这里我们从清理后的消息中提取句子
-      const sentences = extractSentencesWithRules(cleanedMessage, settings);
-      if (sentences.length === 0) {
+      const extractedPairs = extractSentencesWithRules(cleanedMessage, settings);
+      if (extractedPairs.length === 0) {
         showToast('info', '在消息中未找到包含禁用词的完整句子。');
         return;
       }
 
-      // 此时句子已经是干净的，直接编号即可
-      const sourceContent = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
+      // For the AI, we use the cleaned sentences.
+      const cleanedSentences = extractedPairs.map(p => p.cleaned);
+      const sourceContentForAI = cleanedSentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
+
+      // For matching, we'll use the original sentences.
+      const originalSentencesForReplacement = extractedPairs.map(p => p.original);
 
       showToast('success', '句子提取成功，正在发送给AI优化...');
-      const optimizedResultText = await getOptimizedText(sourceContent, latestMessage.message);
+      const optimizedResultText = await getOptimizedText(sourceContentForAI, latestMessage.message);
       if (optimizedResultText === null) {
         // Optimization was aborted or failed, message already shown.
         return;
@@ -122,7 +125,8 @@ async function onGenerationEnded(messageId: number) {
       }
 
       showToast('success', 'AI优化完成，正在执行替换...');
-      await replaceMessageInternal(latestMessage, sourceContent, optimizedResultText);
+      // Pass the original sentences (un-numbered) to the replacement function.
+      await replaceMessageInternal(latestMessage, originalSentencesForReplacement, optimizedResultText);
       showToast('success', '自动优化完成！', '成功', { timeOut: 5000 });
     } catch (error: any) {
       console.error('[Auto Optimizer] 流程执行出错:', error);
@@ -206,15 +210,17 @@ async function showOptimizationPopup(originalMessage: any, foundWords: string[],
   const context = getContext();
   const settings = getPluginSettings();
 
-  const sentencesToOptimize = isManual
-    ? [originalMessage.message]
+  const extractedResult = isManual
+    ? [{ original: originalMessage.message, cleaned: originalMessage.message }]
     : extractSentencesWithRules(originalMessage.message, settings);
 
-  if (sentencesToOptimize.length === 0) {
+  if (extractedResult.length === 0) {
     // (toastr as any).info('在消息中未找到包含禁用词的句子。');
     return;
   }
 
+  const sentencesToOptimize = extractedResult.map(p => p.cleaned);
+  const originalSentences = extractedResult.map(p => p.original);
   const initialText = sentencesToOptimize.join('\n');
 
   const popupId = 'ai-optimizer-manual-popup';
@@ -244,7 +250,8 @@ async function showOptimizationPopup(originalMessage: any, foundWords: string[],
     const optimizedText = await getOptimizedText(textToSend);
 
     if (optimizedText) {
-      await showReplacementPopup(originalMessage, sentencesToOptimize, optimizedText, isManual);
+      // We pass the *original* sentences here for the replacement logic.
+      await showReplacementPopup(originalMessage, originalSentences, optimizedText, isManual);
     } else {
       showToast('error', 'AI 未能返回优化后的文本。');
     }
@@ -290,7 +297,10 @@ async function showReplacementPopup(
     }
 
     // 将 \n 替换为 <br> 以便在聊天中正确显示换行
-    const formattedMessage = newFullMessage.trim().replace(/\r?\n/g, '<br>').replace(/(<br>\s*){2,}/g, '<br>');
+    const formattedMessage = newFullMessage
+      .trim()
+      .replace(/\r?\n/g, '<br>')
+      .replace(/(<br>\s*){2,}/g, '<br>');
 
     await (window as any).TavernHelper.setChatMessages([
       {
@@ -567,30 +577,48 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
  * 如果找到的句子少于10个字符，则会自动包含其前后句子。
  * @param text 全文。
  * @param settings 插件设置。
+ * @returns An array of objects, each with an 'original' and 'cleaned' version of the sentence.
  */
-function extractSentencesWithRules(text: string, settings: Settings): string[] {
-  const plainText = text.replace(/<[^>]*>/g, '');
-  // 1. Split by sentence-ending punctuation (including optional closing quotes), keeping the delimiters.
-  const parts = plainText.split(/([.!?。！？]+(?:["”’】\]]?))/g);
-  const sentences_temp: string[] = [];
-  if (parts.length > 1) {
-    for (let i = 0; i < parts.length; i += 2) {
-      const sentencePart = parts[i] || '';
-      const delimiter = parts[i + 1] || '';
-      sentences_temp.push(sentencePart + delimiter);
+function extractSentencesWithRules(
+  text: string,
+  settings: Settings,
+): { original: string; cleaned: string }[] {
+  const plainText = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+  // 1. Split by newlines first to respect paragraph/line breaks from the user.
+  const lines = plainText.split('\n').map(line => line.trim());
+
+  // 2. Further split each line into sentences, but keep them grouped by original line.
+  const lineSentences = lines.map(line => {
+    if (!line) return [];
+    const parts = line.split(/([.!?。！？]+(?:["”’】\]]?))/g);
+    const sentences_temp: string[] = [];
+    if (parts.length > 1) {
+      for (let i = 0; i < parts.length; i += 2) {
+        const sentencePart = parts[i] || '';
+        const delimiter = parts[i + 1] || '';
+        if (sentencePart.trim() || delimiter.trim()) {
+          sentences_temp.push(sentencePart + delimiter);
+        }
+      }
+    } else if (line.trim().length > 0) {
+      sentences_temp.push(line);
     }
-  } else if (plainText.trim().length > 0) {
-    sentences_temp.push(plainText);
-  }
+    return sentences_temp.filter(s => /[\p{L}\p{N}]/u.test(s));
+  });
 
-  // 2. Filter out parts that don't contain any letters or numbers.
-  const hasContentRegex = /[\p{L}\p{N}]/u;
-  const sentences = sentences_temp.filter(s => hasContentRegex.test(s));
+  // Flatten the sentences but keep track of their original line index.
+  const sentences: { text: string; line: number }[] = [];
+  lineSentences.forEach((sents, lineIndex) => {
+    sents.forEach(s => {
+      sentences.push({ text: s, line: lineIndex });
+    });
+  });
 
-  // If, after filtering, we have nothing, but the original text was not empty,
-  // it means the text might be a single block without standard punctuation.
+  // If, after all splitting, we have nothing, but the original text was not empty,
+  // treat the whole thing as one block.
   if (sentences.length === 0 && plainText.trim().length > 0) {
-    return [plainText.trim()];
+    const trimmedText = plainText.trim();
+    return [{ original: trimmedText, cleaned: trimmedText }];
   }
 
   // 2. 准备匹配规则
@@ -615,7 +643,7 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   // 4. 查找所有匹配规则的句子索引
   const matchingIndices = new Set<number>();
   sentences.forEach((sentence, index) => {
-    const trimmedSentence = sentence.trim();
+    const trimmedSentence = sentence.text.trim();
     if (disabledWordRegex && disabledWordRegex.test(trimmedSentence)) {
       matchingIndices.add(index);
     }
@@ -637,7 +665,7 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   matchingIndices.forEach(index => {
     finalIndices.add(index);
     // 仅在检查长度时移除引号和空格
-    const lengthCheckSentence = (sentences[index] || '').trim().replace(/["'“‘”’]/g, '');
+    const lengthCheckSentence = (sentences[index]?.text || '').trim().replace(/["'“‘”’]/g, '');
     if (lengthCheckSentence.length < 10) {
       expansionTriggered.add(index); // Mark this as a short sentence trigger
       if (index > 0) {
@@ -667,19 +695,20 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
   groups.push(currentGroup);
 
   // 7. 合并并处理最终的句子，保留顺序
-  const finalSentences: string[] = [];
+  const finalSentences: { original: string; cleaned: string }[] = [];
   const processedIndices = new Set<number>();
   groups.forEach(group => {
     if (group.some(index => processedIndices.has(index))) {
       return;
     }
     // Join the original sentence parts and then trim the final block.
-    const combinedSentence = group.map(index => sentences[index]).join('');
-    let sentenceToClean = combinedSentence.trim();
+    const combinedSentence = group.map(index => sentences[index].text).join('');
+    const originalSentence = combinedSentence.trim();
 
-    if (sentenceToClean) {
+    if (originalSentence) {
+      let cleanedSentence = originalSentence;
       // Always remove leading junk characters from concatenation.
-      sentenceToClean = sentenceToClean.replace(/^[\s】\]*,]*/, '');
+      cleanedSentence = cleanedSentence.replace(/^[\s】\]*,]*/, '');
 
       // A group is a "short sentence case" if it was expanded because of a short sentence.
       // Otherwise, it's a "long sentence case".
@@ -704,12 +733,12 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
         ];
 
         let wasModified = true;
-        while (wasModified && sentenceToClean.length > 1) {
+        while (wasModified && cleanedSentence.length > 1) {
           wasModified = false;
           for (const pair of bracketPairs) {
-            if (sentenceToClean.startsWith(pair.open) && sentenceToClean.endsWith(pair.close)) {
-              sentenceToClean = sentenceToClean
-                .substring(pair.open.length, sentenceToClean.length - pair.close.length)
+            if (cleanedSentence.startsWith(pair.open) && cleanedSentence.endsWith(pair.close)) {
+              cleanedSentence = cleanedSentence
+                .substring(pair.open.length, cleanedSentence.length - pair.close.length)
                 .trim();
               wasModified = true;
               // Break and restart the loop to handle nested brackets.
@@ -720,10 +749,10 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
       }
 
       // Final cleanup of any newly exposed leading junk.
-      const finalCleanedSentence = sentenceToClean.replace(/^[\s】\]*,]*/, '');
+      const finalCleanedSentence = cleanedSentence.replace(/^[\s】\]*,]*/, '');
 
       if (finalCleanedSentence) {
-        finalSentences.push(finalCleanedSentence);
+        finalSentences.push({ original: originalSentence, cleaned: finalCleanedSentence });
         group.forEach(index => processedIndices.add(index));
       }
     }
@@ -925,11 +954,13 @@ export function manualOptimize(callback: (content: string) => void) {
   }
 
   // 步骤 2: 在清理后的文本中提取句子
-  const sentences = extractSentencesWithRules(cleanedMessage, settings);
+  const extractedPairs = extractSentencesWithRules(cleanedMessage, settings);
 
-  if (sentences.length > 0) {
+  if (extractedPairs.length > 0) {
     showToast('success', '已提取待优化内容。');
-    const numberedSentences = sentences.map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
+    // We show the cleaned sentences to the user for editing.
+    const cleanedSentences = extractedPairs.map(p => p.cleaned);
+    const numberedSentences = cleanedSentences.map((sentence, index) => `${index + 1}. ${sentence}`).join('\n');
     callback(numberedSentences);
   } else {
     // 在 Panel.vue 中处理此情况的UI反馈
@@ -1009,12 +1040,12 @@ export async function optimizeText(
  * @param originalContent 原始句子内容。
  * @param optimizedContent 优化后的句子内容。
  */
-async function replaceMessageInternal(lastCharMessage: any, originalContent: string, optimizedContent: string) {
+async function replaceMessageInternal(
+  lastCharMessage: any,
+  originalSentences: string[],
+  optimizedContent: string,
+) {
   const context = getContext();
-  const originalSentences = originalContent
-    .split('\n')
-    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
-    .filter(Boolean);
   // Keep empty strings to match original count, preventing faulty mismatch logic.
   const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
     s.replace(/^\d+[.)]\s*/, '').trim(),
@@ -1030,7 +1061,7 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
   // If sentence counts don't match, abort to prevent deleting text. This was the likely cause of the bug.
   if (originalSentences.length !== optimizedSentences.length) {
     console.error(
-      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Aborting replacement to prevent errors.`,
+      `[AI Optimizer] Mismatch in sentence count. Original Sentences for Replacement: ${originalSentences.length}, Optimized Sentences from AI: ${optimizedSentences.length}. Aborting replacement to prevent errors.`,
     );
     showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消自动替换。');
     return;
@@ -1042,11 +1073,19 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
     // Ensure optimized is a string. If it's null or undefined, keep the original.
     if (typeof optimized !== 'string') return;
 
-    // Create a regex to find the original sentence. We'll only replace the first match.
-    const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+    // Build a "fuzzy" regex that ignores HTML tags between words.
+    const words = original
+      .split(/\s+/)
+      .map(word => word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+      .filter(Boolean);
+    if (words.length === 0) {
+      console.warn(`[AI Optimizer] Skipping empty original sentence.`);
+      return;
+    }
+    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s+)*'), 'i');
 
     let replaced = false;
-    modifiedMessage = modifiedMessage.replace(regex, (match: string) => {
+    modifiedMessage = modifiedMessage.replace(fuzzyRegex, (match: string) => {
       if (replaced) {
         return match; // Don't replace subsequent matches of the same sentence
       }
@@ -1079,7 +1118,7 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
 }
 
 export function replaceMessage(
-  originalContent: string,
+  originalContent: string, // This is now the numbered, cleaned content from the UI
   optimizedContent: string,
   callback: (newContent: string) => void,
 ) {
@@ -1087,6 +1126,7 @@ export function replaceMessage(
 
   const context = getContext();
   const chat = context.chat;
+  const settings = getPluginSettings();
 
   if (!chat || chat.length === 0) {
     showToast('error', '聊天记录为空，无法替换。');
@@ -1107,35 +1147,51 @@ export function replaceMessage(
     return;
   }
 
-  const originalSentences = originalContent
+  // Re-extract the *original* sentences from the message to ensure we have the right ones for matching.
+  const extractedPairs = extractSentencesWithRules(cleanTextWithRegex(lastCharMessage.mes), settings);
+  const originalSentencesForReplacement = extractedPairs.map(p => p.original);
+
+  // The UI gives us the cleaned sentences, which we need to match against our re-extracted original sentences.
+  const cleanedSentencesFromUI = originalContent
     .split('\n')
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
-  // Keep empty strings to match original count, preventing faulty mismatch logic.
+
+  // The AI gives us the optimized sentences.
   const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
     s.replace(/^\d+[.)]\s*/, '').trim(),
   );
 
-  if (originalSentences.length !== optimizedSentences.length) {
+  // We need to ensure the number of sentences from the AI matches what we expect.
+  if (cleanedSentencesFromUI.length !== optimizedSentences.length) {
     console.error(
-      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Aborting replacement.`,
+      `[AI Optimizer] Mismatch in sentence count. Sentences from UI: ${cleanedSentencesFromUI.length}, Optimized Sentences from AI: ${optimizedSentences.length}. Aborting replacement.`,
     );
     showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消替换。');
-    // In manual mode, we still want to update the preview box with what we have.
     callback(lastCharMessage.mes); // Return original message on error
     return;
   }
 
   let modifiedMessage = lastCharMessage.mes;
 
-  originalSentences.forEach((original, index) => {
+  // Now, we replace the *original* sentences with the *optimized* ones.
+  originalSentencesForReplacement.forEach((original, index) => {
     const optimized = optimizedSentences[index];
     if (typeof optimized !== 'string') return;
 
-    const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+    // Build a "fuzzy" regex that ignores HTML tags between words.
+    const words = original
+      .split(/\s+/)
+      .map(word => word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
+      .filter(Boolean);
+    if (words.length === 0) {
+      console.warn(`[AI Optimizer] Skipping empty original sentence in manual mode.`);
+      return;
+    }
+    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s+)*'), 'i');
 
     let replaced = false;
-    modifiedMessage = modifiedMessage.replace(regex, (match: string) => {
+    modifiedMessage = modifiedMessage.replace(fuzzyRegex, (match: string) => {
       if (replaced) {
         return match;
       }
@@ -1153,7 +1209,9 @@ export function replaceMessage(
 
   // 执行替换
   (async () => {
-    await replaceMessageInternal(lastCharMessage, originalContent, optimizedContent);
+    // We pass the re-extracted original sentences here for consistency.
+    // The `optimizedContent` is passed directly as it comes from the AI.
+    await replaceMessageInternal(lastCharMessage, originalSentencesForReplacement, optimizedContent);
     showToast('success', '已添加优化后的消息版本！');
   })();
 }
