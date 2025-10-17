@@ -681,10 +681,15 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
       // Always remove leading junk characters from concatenation.
       sentenceToClean = sentenceToClean.replace(/^[\s】\]*,]*/, '');
 
-      // Check if this group was formed due to a short-sentence expansion.
-      const shouldStripBrackets = group.some(index => expansionTriggered.has(index));
+      // A group is a "short sentence case" if it was expanded because of a short sentence.
+      // Otherwise, it's a "long sentence case".
+      const isShortSentenceCase = group.some(index => expansionTriggered.has(index));
 
-      if (shouldStripBrackets) {
+      // Per user request:
+      // - Long sentences (>10 chars): REMOVE brackets.
+      // - Short sentences (<=10 chars) that get expanded: KEEP brackets.
+      // Therefore, we strip brackets only if it's NOT a short sentence case.
+      if (!isShortSentenceCase) {
         // Iteratively remove surrounding brackets.
         const bracketPairs = [
           { open: '【', close: '】' },
