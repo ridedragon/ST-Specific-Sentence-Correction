@@ -673,9 +673,14 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
     }
     // Join the original sentence parts and then trim the final block.
     const combinedSentence = group.map(index => sentences[index]).join('');
-    if (combinedSentence.trim()) {
-      finalSentences.push(combinedSentence.trim());
-      group.forEach(index => processedIndices.add(index));
+    const trimmedSentence = combinedSentence.trim();
+    if (trimmedSentence) {
+      // 移除句子开头可能存在的、不属于句子内容的常见符号，例如前一个句子的后括号。
+      const cleanedSentence = trimmedSentence.replace(/^[\s】\]*,]*/, '');
+      if (cleanedSentence) {
+        finalSentences.push(cleanedSentence);
+        group.forEach(index => processedIndices.add(index));
+      }
     }
   });
 
