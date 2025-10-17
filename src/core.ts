@@ -571,7 +571,7 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
 function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
   // 1. Split by sentence-ending punctuation (including optional closing quotes), keeping the delimiters.
-  const parts = plainText.split(/([.!?。！？]+(?:["”’]?))/g);
+  const parts = plainText.split(/([.!?。！？]+(?:["”’】\]]?))/g);
   const sentences_temp: string[] = [];
   if (parts.length > 1) {
     for (let i = 0; i < parts.length; i += 2) {
@@ -633,11 +633,13 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
 
   // 5. 为短句子扩展上下文
   const finalIndices = new Set<number>();
+  const expansionTriggered = new Set<number>(); // Track original short sentences
   matchingIndices.forEach(index => {
     finalIndices.add(index);
     // 仅在检查长度时移除引号和空格
     const lengthCheckSentence = (sentences[index] || '').trim().replace(/["'“‘”’]/g, '');
     if (lengthCheckSentence.length < 10) {
+      expansionTriggered.add(index); // Mark this as a short sentence trigger
       if (index > 0) {
         finalIndices.add(index - 1);
       }
@@ -676,38 +678,43 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
     let sentenceToClean = combinedSentence.trim();
 
     if (sentenceToClean) {
-      // First, remove any leading junk characters that are not part of a bracket pair.
+      // Always remove leading junk characters from concatenation.
       sentenceToClean = sentenceToClean.replace(/^[\s】\]*,]*/, '');
 
-      // Then, iteratively remove surrounding brackets.
-      const bracketPairs = [
-        { open: '【', close: '】' },
-        { open: '[', close: ']' },
-        { open: '(', close: ')' },
-        { open: '（', close: '）' },
-        { open: '{', close: '}' },
-        { open: '"', close: '"' },
-        { open: "'", close: "'" },
-        { open: '“', close: '”' },
-        { open: '‘', close: '’' },
-      ];
+      // Check if this group was formed due to a short-sentence expansion.
+      const shouldStripBrackets = group.some(index => expansionTriggered.has(index));
 
-      let wasModified = true;
-      while (wasModified && sentenceToClean.length > 1) {
-        wasModified = false;
-        for (const pair of bracketPairs) {
-          if (sentenceToClean.startsWith(pair.open) && sentenceToClean.endsWith(pair.close)) {
-            sentenceToClean = sentenceToClean
-              .substring(pair.open.length, sentenceToClean.length - pair.close.length)
-              .trim();
-            wasModified = true;
-            // Break and restart the loop to handle nested brackets of different types, e.g., "【(text)】"
-            break;
+      if (shouldStripBrackets) {
+        // Iteratively remove surrounding brackets.
+        const bracketPairs = [
+          { open: '【', close: '】' },
+          { open: '[', close: ']' },
+          { open: '(', close: ')' },
+          { open: '（', close: '）' },
+          { open: '{', close: '}' },
+          { open: '"', close: '"' },
+          { open: "'", close: "'" },
+          { open: '“', close: '”' },
+          { open: '‘', close: '’' },
+        ];
+
+        let wasModified = true;
+        while (wasModified && sentenceToClean.length > 1) {
+          wasModified = false;
+          for (const pair of bracketPairs) {
+            if (sentenceToClean.startsWith(pair.open) && sentenceToClean.endsWith(pair.close)) {
+              sentenceToClean = sentenceToClean
+                .substring(pair.open.length, sentenceToClean.length - pair.close.length)
+                .trim();
+              wasModified = true;
+              // Break and restart the loop to handle nested brackets.
+              break;
+            }
           }
         }
       }
 
-      // Final cleanup of any exposed leading junk
+      // Final cleanup of any newly exposed leading junk.
       const finalCleanedSentence = sentenceToClean.replace(/^[\s】\]*,]*/, '');
 
       if (finalCleanedSentence) {
