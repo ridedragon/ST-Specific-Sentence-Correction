@@ -1015,43 +1015,49 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
     .split('\n')
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || [])
-    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
-    .filter(Boolean);
+  // Keep empty strings to match original count, preventing faulty mismatch logic.
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
+    s.replace(/^\d+[.)]\s*/, '').trim(),
+  );
 
   if (originalSentences.length === 0) {
     console.warn('[AI Optimizer] No original sentences to replace.');
     return;
   }
 
-  // 如果AI返回的句子数量与原始句子数量不匹配，则将所有原始句子替换为完整的优化后内容
   let modifiedMessage = lastCharMessage.mes;
+
+  // If sentence counts don't match, abort to prevent deleting text. This was the likely cause of the bug.
   if (originalSentences.length !== optimizedSentences.length) {
-    console.warn(
-      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Replacing as a single block.`,
+    console.error(
+      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Aborting replacement to prevent errors.`,
     );
-    // 当句子数量不匹配时，将所有优化后的句子（已去编号）合并为一个字符串
-    const replacementText = optimizedSentences.join(' ');
-    // 用合并后的文本替换第一个原始句子
-    modifiedMessage = modifiedMessage.replace(
-      new RegExp(originalSentences[0].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
-      replacementText,
-    );
-    // 移除剩余的原始句子
-    for (let i = 1; i < originalSentences.length; i++) {
-      modifiedMessage = modifiedMessage.replace(
-        new RegExp(originalSentences[i].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
-        '',
-      );
-    }
-  } else {
-    originalSentences.forEach((original, index) => {
-      const optimized = optimizedSentences[index];
-      // 移除 'g' 标志，确保只替换第一个匹配项
-      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
-      modifiedMessage = modifiedMessage.replace(regex, optimized);
-    });
+    showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消自动替换。');
+    return;
   }
+
+  // Perform 1-to-1 replacement as requested.
+  originalSentences.forEach((original, index) => {
+    const optimized = optimizedSentences[index];
+    // Ensure optimized is a string. If it's null or undefined, keep the original.
+    if (typeof optimized !== 'string') return;
+
+    // Create a regex to find the original sentence. We'll only replace the first match.
+    const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+
+    let replaced = false;
+    modifiedMessage = modifiedMessage.replace(regex, (match: string) => {
+      if (replaced) {
+        return match; // Don't replace subsequent matches of the same sentence
+      }
+      replaced = true;
+      return optimized;
+    });
+
+    if (!replaced) {
+      console.warn(`[AI Optimizer] Could not find sentence to replace: "${original}"`);
+    }
+  });
 
   const tempVarName = `__optimizer_swipe_text_${Date.now()}`;
   const formattedMessage = modifiedMessage.replace(/\r?\n/g, '<br>').replace(/(<br>\s*){2,}/g, '<br>');
@@ -1105,39 +1111,42 @@ export function replaceMessage(
     .split('\n')
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || [])
-    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
-    .filter(Boolean);
+  // Keep empty strings to match original count, preventing faulty mismatch logic.
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
+    s.replace(/^\d+[.)]\s*/, '').trim(),
+  );
 
   if (originalSentences.length !== optimizedSentences.length) {
-    console.warn('[AI Optimizer] Mismatch in sentence count. Will attempt block replacement.');
+    console.error(
+      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Aborting replacement.`,
+    );
+    showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消替换。');
+    // In manual mode, we still want to update the preview box with what we have.
+    callback(lastCharMessage.mes); // Return original message on error
+    return;
   }
 
   let modifiedMessage = lastCharMessage.mes;
 
-  // 当句子数量不匹配时，进行块替换
-  if (originalSentences.length !== optimizedSentences.length) {
-    const replacementText = optimizedSentences.join(' ');
-    modifiedMessage = modifiedMessage.replace(
-      new RegExp(originalSentences[0].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
-      replacementText,
-    );
-    for (let i = 1; i < originalSentences.length; i++) {
-      modifiedMessage = modifiedMessage.replace(
-        new RegExp(originalSentences[i].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
-        '',
-      );
-    }
-  } else {
-    originalSentences.forEach((original, index) => {
-      const optimized = optimizedSentences[index];
-      if (optimized) {
-        // 移除 'g' 标志，确保只替换第一个匹配项
-        const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
-        modifiedMessage = modifiedMessage.replace(regex, optimized);
+  originalSentences.forEach((original, index) => {
+    const optimized = optimizedSentences[index];
+    if (typeof optimized !== 'string') return;
+
+    const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+
+    let replaced = false;
+    modifiedMessage = modifiedMessage.replace(regex, (match: string) => {
+      if (replaced) {
+        return match;
       }
+      replaced = true;
+      return optimized;
     });
-  }
+
+    if (!replaced) {
+      console.warn(`[AI Optimizer] Could not find sentence to replace in manual mode: "${original}"`);
+    }
+  });
 
   // 更新测试文本框
   callback(modifiedMessage);
