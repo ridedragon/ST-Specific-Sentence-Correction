@@ -673,12 +673,45 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
     }
     // Join the original sentence parts and then trim the final block.
     const combinedSentence = group.map(index => sentences[index]).join('');
-    const trimmedSentence = combinedSentence.trim();
-    if (trimmedSentence) {
-      // 移除句子开头可能存在的、不属于句子内容的常见符号，例如前一个句子的后括号。
-      const cleanedSentence = trimmedSentence.replace(/^[\s】\]*,]*/, '');
-      if (cleanedSentence) {
-        finalSentences.push(cleanedSentence);
+    let sentenceToClean = combinedSentence.trim();
+
+    if (sentenceToClean) {
+      // First, remove any leading junk characters that are not part of a bracket pair.
+      sentenceToClean = sentenceToClean.replace(/^[\s】\]*,]*/, '');
+
+      // Then, iteratively remove surrounding brackets.
+      const bracketPairs = [
+        { open: '【', close: '】' },
+        { open: '[', close: ']' },
+        { open: '(', close: ')' },
+        { open: '（', close: '）' },
+        { open: '{', close: '}' },
+        { open: '"', close: '"' },
+        { open: "'", close: "'" },
+        { open: '“', close: '”' },
+        { open: '‘', close: '’' },
+      ];
+
+      let wasModified = true;
+      while (wasModified && sentenceToClean.length > 1) {
+        wasModified = false;
+        for (const pair of bracketPairs) {
+          if (sentenceToClean.startsWith(pair.open) && sentenceToClean.endsWith(pair.close)) {
+            sentenceToClean = sentenceToClean
+              .substring(pair.open.length, sentenceToClean.length - pair.close.length)
+              .trim();
+            wasModified = true;
+            // Break and restart the loop to handle nested brackets of different types, e.g., "【(text)】"
+            break;
+          }
+        }
+      }
+
+      // Final cleanup of any exposed leading junk
+      const finalCleanedSentence = sentenceToClean.replace(/^[\s】\]*,]*/, '');
+
+      if (finalCleanedSentence) {
+        finalSentences.push(finalCleanedSentence);
         group.forEach(index => processedIndices.add(index));
       }
     }
