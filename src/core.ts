@@ -145,25 +145,29 @@ export function checkMessageForDisabledWords(messageText: string): boolean {
     .split(',')
     .map((w: string) => w.trim())
     .filter(Boolean);
-  if (disabledWords.some(word => {
-    const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
-    return new RegExp(escapedWord, 'i').test(cleanedMessage);
-  })) {
+  if (
+    disabledWords.some(word => {
+      const escapedWord = word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+      return new RegExp(escapedWord, 'i').test(cleanedMessage);
+    })
+  ) {
     return true;
   }
 
   // 检查句式模板
   const patterns = settings.sentencePatterns || [];
-  if (patterns.some(pattern => {
-    if (!pattern.enabled || !pattern.valueA) return false;
-    try {
-      const regex = buildRegexFromPattern(pattern);
-      return regex.test(cleanedMessage);
-    } catch (e) {
-      console.error(`[AI Optimizer] Invalid pattern`, pattern, e);
-      return false;
-    }
-  })) {
+  if (
+    patterns.some(pattern => {
+      if (!pattern.enabled || !pattern.valueA) return false;
+      try {
+        const regex = buildRegexFromPattern(pattern);
+        return regex.test(cleanedMessage);
+      } catch (e) {
+        console.error(`[AI Optimizer] Invalid pattern`, pattern, e);
+        return false;
+      }
+    })
+  ) {
     return true;
   }
 
@@ -500,25 +504,20 @@ async function getOptimizedText(textToOptimize: string, lastCharMessageText?: st
 
   // Unified logic for handling context, now used by both auto and manual optimization
   if (lastCharMessageText && processedPrompt.includes('{{charpuremessage}}')) {
-    let contextText = cleanTextWithRegex(lastCharMessageText);
+    const contextText = cleanTextWithRegex(lastCharMessageText);
     processedPrompt = processedPrompt.replace(/\{\{charpuremessage\}\}/g, contextText);
-    const sentenceCount = textToOptimize.split('\n').filter(Boolean).length;
-    userContent = `你是一个专业的文本优化师。你的任务是根据用户提供的上下文，对指定的句子进行优化。
-【绝对规则】:
-1.  **数量必须完全一致**: 用户提供了 ${sentenceCount} 个待优化的句子，你的回复【必须】不多不少，正好是 ${sentenceCount} 个优化后的句子。
-2.  **格式必须严格遵守**: 你的回复【只能】包含带编号的句子列表，每个句子占一行。
-3.  **内容必须纯净**: 【严禁】在回复中包含任何除了编号和句子之外的额外内容，例如“好的”、“优化如下”、“解释”、“注释”或任何Markdown格式。
-4.  **一一对应**: 每个优化后的句子都必须与原始的编号项一一对应。不要合并或拆分句子。
+    // Correctly count items by finding lines that start with a number and a dot. This handles multi-line items correctly.
+    const itemCount = textToOptimize.split('\n').filter(line => /^\d+[.)]\s/.test(line)).length;
+    userContent = `【绝对规则】:
+1.  **【数量必须完全一致】**: 用户提供了 ${itemCount} 个待优化的项目，你的回复【必须】不多不少，正好是 ${itemCount} 个优化后的项目。
+2.  **格式必须严格遵守**: 你的回复【只能】包含带编号的项目列表，每个项目占一行。
+3.  **内容必须纯净**: 【严禁】在回复中包含任何除了编号和项目之外的额外内容，例如“好的”、“优化如下”、“解释”、“注释”或任何Markdown格式。
+4.  **一一对应**: 每个优化后的项目都必须与原始的编号项一一对应。不要合并或拆分项目。
 
-【上下文】:
-\`\`\`
-${contextText}
-\`\`\`
-
-【待优化句子】 (共 ${sentenceCount} 项):
+【待修改优化项目】 (共 ${itemCount} 项):
 ${textToOptimize}
 
-请严格按照上述规则，对【待优化句子】中的每一项进行优化，并仅返回纯净的、编号数量完全一致的结果。`;
+请严格按照上述规则，对【待修改优化项目】中的每一项进行修改优化以去除禁用词和禁用句，并仅返回纯净的、编号数量完全一致的结果。`;
   }
 
   const messages = [
@@ -563,7 +562,6 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
   }
 }
 
-
 /**
  * 从文本中提取包含禁用词或匹配句式模板的句子。
  * 如果找到的句子少于10个字符，则会自动包含其前后句子。
@@ -572,9 +570,8 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
  */
 function extractSentencesWithRules(text: string, settings: Settings): string[] {
   const plainText = text.replace(/<[^>]*>/g, '');
-  // 1. Split by sentence-ending punctuation and any trailing quotes/spaces, keeping the delimiters.
-  // This regex is designed to prevent stray punctuation like "]" or "”" from starting a new "sentence".
-  const parts = plainText.split(/([.!?。！？](?:["'“‘”’\])}`]|\s)*)/g);
+  // 1. Split by sentence-ending punctuation (including optional closing quotes), keeping the delimiters.
+  const parts = plainText.split(/([.!?。！？]+(?:["”’]?))/g);
   const sentences_temp: string[] = [];
   if (parts.length > 1) {
     for (let i = 0; i < parts.length; i += 2) {
@@ -601,8 +598,7 @@ function extractSentencesWithRules(text: string, settings: Settings): string[] {
     .split(',')
     .map((w: string) => w.trim())
     .filter(Boolean);
-  const disabledWordRegex =
-    disabledWords.length > 0 ? new RegExp(disabledWords.map(escapeRegex).join('|'), 'i') : null;
+  const disabledWordRegex = disabledWords.length > 0 ? new RegExp(disabledWords.map(escapeRegex).join('|'), 'i') : null;
 
   const patterns = (settings.sentencePatterns || []).filter(p => p.enabled && p.valueA);
   const patternRegexes = patterns
@@ -969,7 +965,7 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
     .split('\n')
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || [])
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
 
@@ -981,18 +977,28 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
   // 如果AI返回的句子数量与原始句子数量不匹配，则将所有原始句子替换为完整的优化后内容
   let modifiedMessage = lastCharMessage.mes;
   if (originalSentences.length !== optimizedSentences.length) {
-    console.warn('[AI Optimizer] Mismatch in sentence count. Replacing the whole block.');
-    // 找到第一个原始句子并替换整个块
-    const firstSentence = originalSentences[0];
-    modifiedMessage = modifiedMessage.replace(firstSentence, optimizedContent);
+    console.warn(
+      `[AI Optimizer] Mismatch in sentence count. Original: ${originalSentences.length}, Optimized: ${optimizedSentences.length}. Replacing as a single block.`,
+    );
+    // 当句子数量不匹配时，将所有优化后的句子（已去编号）合并为一个字符串
+    const replacementText = optimizedSentences.join(' ');
+    // 用合并后的文本替换第一个原始句子
+    modifiedMessage = modifiedMessage.replace(
+      new RegExp(originalSentences[0].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
+      replacementText,
+    );
     // 移除剩余的原始句子
     for (let i = 1; i < originalSentences.length; i++) {
-      modifiedMessage = modifiedMessage.replace(originalSentences[i], '');
+      modifiedMessage = modifiedMessage.replace(
+        new RegExp(originalSentences[i].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
+        '',
+      );
     }
   } else {
     originalSentences.forEach((original, index) => {
       const optimized = optimizedSentences[index];
-      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+      // 移除 'g' 标志，确保只替换第一个匹配项
+      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
       modifiedMessage = modifiedMessage.replace(regex, optimized);
     });
   }
@@ -1049,7 +1055,7 @@ export function replaceMessage(
     .split('\n')
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*.*?(?=\s*\d+[.)]|$)/g) || [])
+  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || [])
     .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
     .filter(Boolean);
 
@@ -1059,13 +1065,29 @@ export function replaceMessage(
 
   let modifiedMessage = lastCharMessage.mes;
 
-  originalSentences.forEach((original, index) => {
-    const optimized = optimizedSentences[index];
-    if (optimized) {
-      const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
-      modifiedMessage = modifiedMessage.replace(regex, optimized);
+  // 当句子数量不匹配时，进行块替换
+  if (originalSentences.length !== optimizedSentences.length) {
+    const replacementText = optimizedSentences.join(' ');
+    modifiedMessage = modifiedMessage.replace(
+      new RegExp(originalSentences[0].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
+      replacementText,
+    );
+    for (let i = 1; i < originalSentences.length; i++) {
+      modifiedMessage = modifiedMessage.replace(
+        new RegExp(originalSentences[i].replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')),
+        '',
+      );
     }
-  });
+  } else {
+    originalSentences.forEach((original, index) => {
+      const optimized = optimizedSentences[index];
+      if (optimized) {
+        // 移除 'g' 标志，确保只替换第一个匹配项
+        const regex = new RegExp(original.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'));
+        modifiedMessage = modifiedMessage.replace(regex, optimized);
+      }
+    });
+  }
 
   // 更新测试文本框
   callback(modifiedMessage);
