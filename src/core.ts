@@ -290,7 +290,7 @@ async function showReplacementPopup(
     }
 
     // 将 \n 替换为 <br> 以便在聊天中正确显示换行
-    const formattedMessage = newFullMessage.trim().replace(/\r?\n/g, '<br>');
+    const formattedMessage = newFullMessage.trim().replace(/\r?\n/g, '<br>').replace(/(<br>\s*){2,}/g, '<br>');
 
     await (window as any).TavernHelper.setChatMessages([
       {
@@ -1054,7 +1054,7 @@ async function replaceMessageInternal(lastCharMessage: any, originalContent: str
   }
 
   const tempVarName = `__optimizer_swipe_text_${Date.now()}`;
-  const formattedMessage = modifiedMessage.replace(/\r?\n/g, '<br>');
+  const formattedMessage = modifiedMessage.replace(/\r?\n/g, '<br>').replace(/(<br>\s*){2,}/g, '<br>');
   const safeMessageForSetvar = JSON.stringify(formattedMessage);
 
   const commandChain = [
