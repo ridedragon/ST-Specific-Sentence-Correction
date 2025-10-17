@@ -395,7 +395,6 @@ onMounted(() => {
 
   messagePollingInterval = window.setInterval(() => {
     const newMessage = getLastCharMessage();
-    console.log('[AI Optimizer] Polling for lastCharMessage:', newMessage);
     if (newMessage !== lastCharMessageContent.value) {
       lastCharMessageContent.value = newMessage;
       console.log('[AI Optimizer] lastCharMessage updated.');
