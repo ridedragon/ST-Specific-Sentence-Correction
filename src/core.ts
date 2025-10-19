@@ -584,35 +584,9 @@ function extractSentencesWithRules(
   settings: Settings,
 ): { original: string; cleaned: string }[] {
   const plainText = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
-  // 1. Split by newlines first to respect paragraph/line breaks from the user.
-  const lines = plainText.split('\n').map(line => line.trim());
-
-  // 2. Further split each line into sentences, but keep them grouped by original line.
-  const lineSentences = lines.map(line => {
-    if (!line) return [];
-    const parts = line.split(/([.!?。！？]+(?:["”’】\]]?))/g);
-    const sentences_temp: string[] = [];
-    if (parts.length > 1) {
-      for (let i = 0; i < parts.length; i += 2) {
-        const sentencePart = parts[i] || '';
-        const delimiter = parts[i + 1] || '';
-        if (sentencePart.trim() || delimiter.trim()) {
-          sentences_temp.push(sentencePart + delimiter);
-        }
-      }
-    } else if (line.trim().length > 0) {
-      sentences_temp.push(line);
-    }
-    return sentences_temp.filter(s => /[\p{L}\p{N}]/u.test(s));
-  });
-
-  // Flatten the sentences but keep track of their original line index.
-  const sentences: { text: string; line: number }[] = [];
-  lineSentences.forEach((sents, lineIndex) => {
-    sents.forEach(s => {
-      sentences.push({ text: s, line: lineIndex });
-    });
-  });
+  // 1. Treat each line as a potential sentence. This is less destructive.
+  const lines = plainText.split('\n');
+  const sentences = lines.map((line, index) => ({ text: line, line: index }));
 
   // If, after all splitting, we have nothing, but the original text was not empty,
   // treat the whole thing as one block.
@@ -640,10 +614,13 @@ function extractSentencesWithRules(
     })
     .filter((p): p is RegExp => p !== null);
 
-  // 4. 查找所有匹配规则的句子索引
+  // 4. 查找所有匹配规则的句子索引 (now line indices)
   const matchingIndices = new Set<number>();
   sentences.forEach((sentence, index) => {
     const trimmedSentence = sentence.text.trim();
+    // An empty line shouldn't trigger anything.
+    if (trimmedSentence === '') return;
+
     if (disabledWordRegex && disabledWordRegex.test(trimmedSentence)) {
       matchingIndices.add(index);
     }
@@ -666,7 +643,7 @@ function extractSentencesWithRules(
     finalIndices.add(index);
     // 仅在检查长度时移除引号和空格
     const lengthCheckSentence = (sentences[index]?.text || '').trim().replace(/["'“‘”’]/g, '');
-    if (lengthCheckSentence.length < 10) {
+    if (lengthCheckSentence.length > 0 && lengthCheckSentence.length < 10) {
       expansionTriggered.add(index); // Mark this as a short sentence trigger
       if (index > 0) {
         finalIndices.add(index - 1);
@@ -685,6 +662,7 @@ function extractSentencesWithRules(
   const groups: number[][] = [];
   let currentGroup: number[] = [sortedIndices[0]];
   for (let i = 1; i < sortedIndices.length; i++) {
+    // Group consecutive lines
     if (sortedIndices[i] === sortedIndices[i - 1] + 1) {
       currentGroup.push(sortedIndices[i]);
     } else {
@@ -701,14 +679,12 @@ function extractSentencesWithRules(
     if (group.some(index => processedIndices.has(index))) {
       return;
     }
-    // Join the original sentence parts and then trim the final block.
-    const combinedSentence = group.map(index => sentences[index].text).join('');
-    const originalSentence = combinedSentence.trim();
+    // Join the original lines with newlines to preserve structure.
+    const originalSentence = group.map(index => sentences[index].text).join('\n');
 
-    if (originalSentence) {
+    // Don't process empty blocks.
+    if (originalSentence.trim()) {
       let cleanedSentence = originalSentence;
-      // Always remove leading junk characters from concatenation.
-      cleanedSentence = cleanedSentence.replace(/^[\s】\]*,]*/, '');
 
       // A group is a "short sentence case" if it was expanded because of a short sentence.
       // Otherwise, it's a "long sentence case".
@@ -719,7 +695,8 @@ function extractSentencesWithRules(
       // - Short sentences (<=10 chars) that get expanded: KEEP brackets.
       // Therefore, we strip brackets only if it's NOT a short sentence case.
       if (!isShortSentenceCase) {
-        // Iteratively remove surrounding brackets.
+        // This logic is complex and might be better applied to the cleaned version only.
+        // For now, let's apply it as it was.
         const bracketPairs = [
           { open: '【', close: '】' },
           { open: '[', close: ']' },
@@ -732,26 +709,28 @@ function extractSentencesWithRules(
           { open: '‘', close: '’' },
         ];
 
+        let tempCleaned = cleanedSentence.trim();
         let wasModified = true;
-        while (wasModified && cleanedSentence.length > 1) {
+        while (wasModified && tempCleaned.length > 1) {
           wasModified = false;
           for (const pair of bracketPairs) {
-            if (cleanedSentence.startsWith(pair.open) && cleanedSentence.endsWith(pair.close)) {
-              cleanedSentence = cleanedSentence
-                .substring(pair.open.length, cleanedSentence.length - pair.close.length)
+            if (tempCleaned.startsWith(pair.open) && tempCleaned.endsWith(pair.close)) {
+              tempCleaned = tempCleaned
+                .substring(pair.open.length, tempCleaned.length - pair.close.length)
                 .trim();
               wasModified = true;
-              // Break and restart the loop to handle nested brackets.
               break;
             }
           }
         }
+        cleanedSentence = tempCleaned;
       }
 
-      // Final cleanup of any newly exposed leading junk.
-      const finalCleanedSentence = cleanedSentence.replace(/^[\s】\]*,]*/, '');
+      // The final cleaned sentence is the result of the above, trimmed.
+      const finalCleanedSentence = cleanedSentence.trim();
 
       if (finalCleanedSentence) {
+        // IMPORTANT: The 'original' must be the verbatim block from the text.
         finalSentences.push({ original: originalSentence, cleaned: finalCleanedSentence });
         group.forEach(index => processedIndices.add(index));
       }
@@ -1042,59 +1021,60 @@ export async function optimizeText(
  */
 async function replaceMessageInternal(
   lastCharMessage: any,
-  originalSentences: string[],
+  originalItems: string[],
   optimizedContent: string,
 ) {
   const context = getContext();
-  // Keep empty strings to match original count, preventing faulty mismatch logic.
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
+  // This regex correctly splits the AI's response into numbered items, even if they contain newlines.
+  const optimizedItems = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
     s.replace(/^\d+[.)]\s*/, '').trim(),
   );
 
-  if (originalSentences.length === 0) {
-    console.warn('[AI Optimizer] No original sentences to replace.');
+  if (originalItems.length === 0) {
+    console.warn('[AI Optimizer] No original items to replace.');
     return;
   }
 
   let modifiedMessage = lastCharMessage.mes;
 
-  // If sentence counts don't match, abort to prevent deleting text. This was the likely cause of the bug.
-  if (originalSentences.length !== optimizedSentences.length) {
+  // If item counts don't match, abort to prevent deleting text.
+  if (originalItems.length !== optimizedItems.length) {
     console.error(
-      `[AI Optimizer] Mismatch in sentence count. Original Sentences for Replacement: ${originalSentences.length}, Optimized Sentences from AI: ${optimizedSentences.length}. Aborting replacement to prevent errors.`,
+      `[AI Optimizer] Mismatch in item count. Original: ${originalItems.length}, Optimized: ${optimizedItems.length}. Aborting replacement.`,
     );
-    showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消自动替换。');
+    showToast('error', 'AI返回的项目数量与原始数量不匹配，已取消自动替换。');
     return;
   }
 
   // Perform 1-to-1 replacement as requested.
-  originalSentences.forEach((original, index) => {
-    const optimized = optimizedSentences[index];
+  originalItems.forEach((original, index) => {
+    const optimized = optimizedItems[index];
     // Ensure optimized is a string. If it's null or undefined, keep the original.
     if (typeof optimized !== 'string') return;
 
-    // Build a "fuzzy" regex that ignores HTML tags between words.
+    // Build a "fuzzy" regex that ignores HTML tags and treats newlines as optional whitespace.
     const words = original
-      .split(/\s+/)
+      .split(/[\s\n]+/) // Split by any whitespace including newlines
       .map(word => word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
       .filter(Boolean);
     if (words.length === 0) {
-      console.warn(`[AI Optimizer] Skipping empty original sentence.`);
+      console.warn(`[AI Optimizer] Skipping empty original item.`);
       return;
     }
-    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s+)*'), 'i');
+    // This regex allows for flexible whitespace and HTML tags between words.
+    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s|\\n)*'), 'i');
 
     let replaced = false;
     modifiedMessage = modifiedMessage.replace(fuzzyRegex, (match: string) => {
       if (replaced) {
-        return match; // Don't replace subsequent matches of the same sentence
+        return match; // Don't replace subsequent matches of the same item
       }
       replaced = true;
       return optimized;
     });
 
     if (!replaced) {
-      console.warn(`[AI Optimizer] Could not find sentence to replace: "${original}"`);
+      console.warn(`[AI Optimizer] Could not find item to replace: "${original}"`);
     }
   });
 
@@ -1147,48 +1127,47 @@ export function replaceMessage(
     return;
   }
 
-  // Re-extract the *original* sentences from the message to ensure we have the right ones for matching.
+  // Re-extract the *original* items from the message to ensure we have the right ones for matching.
   const extractedPairs = extractSentencesWithRules(cleanTextWithRegex(lastCharMessage.mes), settings);
-  const originalSentencesForReplacement = extractedPairs.map(p => p.original);
+  const originalItemsForReplacement = extractedPairs.map(p => p.original);
 
-  // The UI gives us the cleaned sentences, which we need to match against our re-extracted original sentences.
-  const cleanedSentencesFromUI = originalContent
-    .split('\n')
-    .map(s => s.replace(/^\d+[.)]\s*/, '').trim())
-    .filter(Boolean);
-
-  // The AI gives us the optimized sentences.
-  const optimizedSentences = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
+  // This regex correctly splits the UI content into numbered items, even if they contain newlines.
+  const itemsFromUI = (originalContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
     s.replace(/^\d+[.)]\s*/, '').trim(),
   );
 
-  // We need to ensure the number of sentences from the AI matches what we expect.
-  if (cleanedSentencesFromUI.length !== optimizedSentences.length) {
+  // The AI gives us the optimized items.
+  const optimizedItems = (optimizedContent.match(/\d+[.)]\s*[\s\S]*?(?=\s*\d+[.)]|\s*$)/g) || []).map(s =>
+    s.replace(/^\d+[.)]\s*/, '').trim(),
+  );
+
+  // We need to ensure the number of items from the AI matches what we expect from the UI.
+  if (itemsFromUI.length !== optimizedItems.length) {
     console.error(
-      `[AI Optimizer] Mismatch in sentence count. Sentences from UI: ${cleanedSentencesFromUI.length}, Optimized Sentences from AI: ${optimizedSentences.length}. Aborting replacement.`,
+      `[AI Optimizer] Mismatch in item count. Items from UI: ${itemsFromUI.length}, Optimized Items from AI: ${optimizedItems.length}. Aborting replacement.`,
     );
-    showToast('error', 'AI返回的句子数量与原始数量不匹配，已取消替换。');
+    showToast('error', 'AI返回的项目数量与原始数量不匹配，已取消替换。');
     callback(lastCharMessage.mes); // Return original message on error
     return;
   }
 
   let modifiedMessage = lastCharMessage.mes;
 
-  // Now, we replace the *original* sentences with the *optimized* ones.
-  originalSentencesForReplacement.forEach((original, index) => {
-    const optimized = optimizedSentences[index];
+  // Now, we replace the *original* items with the *optimized* ones.
+  originalItemsForReplacement.forEach((original, index) => {
+    const optimized = optimizedItems[index];
     if (typeof optimized !== 'string') return;
 
-    // Build a "fuzzy" regex that ignores HTML tags between words.
+    // Build a "fuzzy" regex that ignores HTML tags and treats newlines as optional whitespace.
     const words = original
-      .split(/\s+/)
+      .split(/[\s\n]+/) // Split by any whitespace including newlines
       .map(word => word.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'))
       .filter(Boolean);
     if (words.length === 0) {
-      console.warn(`[AI Optimizer] Skipping empty original sentence in manual mode.`);
+      console.warn(`[AI Optimizer] Skipping empty original item in manual mode.`);
       return;
     }
-    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s+)*'), 'i');
+    const fuzzyRegex = new RegExp(words.join('(<[^>]+>|\\s|\\n)*'), 'i');
 
     let replaced = false;
     modifiedMessage = modifiedMessage.replace(fuzzyRegex, (match: string) => {
@@ -1200,7 +1179,7 @@ export function replaceMessage(
     });
 
     if (!replaced) {
-      console.warn(`[AI Optimizer] Could not find sentence to replace in manual mode: "${original}"`);
+      console.warn(`[AI Optimizer] Could not find item to replace in manual mode: "${original}"`);
     }
   });
 
@@ -1209,9 +1188,9 @@ export function replaceMessage(
 
   // 执行替换
   (async () => {
-    // We pass the re-extracted original sentences here for consistency.
+    // We pass the re-extracted original items here for consistency.
     // The `optimizedContent` is passed directly as it comes from the AI.
-    await replaceMessageInternal(lastCharMessage, originalSentencesForReplacement, optimizedContent);
+    await replaceMessageInternal(lastCharMessage, originalItemsForReplacement, optimizedContent);
     showToast('success', '已添加优化后的消息版本！');
   })();
 }
