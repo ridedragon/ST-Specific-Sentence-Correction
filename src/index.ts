@@ -1,5 +1,6 @@
 import '@/global.css';
 import { initPanel } from '@/panel';
+<<<<<<< HEAD
 import { initialize, manualOptimize, optimizeText, replaceMessage } from '@/core';
 
 // 将核心功能暴露到全局，以便其他脚本可以调用
@@ -17,5 +18,9 @@ $(() => {
   // 初始化核心功能，注册事件监听
   initialize();
   // 初始化UI面板
+=======
+
+$(() => {
+>>>>>>> f49502d1123334f214a8a3684b1c1c41aaa28499
   initPanel();
 });
