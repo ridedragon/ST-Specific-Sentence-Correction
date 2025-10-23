@@ -574,7 +574,7 @@ function buildRegexFromPattern(pattern: Settings['sentencePatterns'][number]): R
 
 /**
  * 从文本中提取包含禁用词或匹配句式模板的句子。
- * 如果找到的句子少于10个字符，则会自动包含其前后句子。
+ * 新版逻辑：基于标点和“容器”进行分割，而不是简单的换行。
  * @param text 全文。
  * @param settings 插件设置。
  * @returns An array of objects, each with an 'original' and 'cleaned' version of the sentence.
@@ -583,19 +583,33 @@ function extractSentencesWithRules(
   text: string,
   settings: Settings,
 ): { original: string; cleaned: string }[] {
+  // 1. 预处理
   const plainText = text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
-  // 1. Treat each line as a potential sentence. This is less destructive.
-  const lines = plainText.split('\n');
-  const sentences = lines.map((line, index) => ({ text: line, line: index }));
 
-  // If, after all splitting, we have nothing, but the original text was not empty,
-  // treat the whole thing as one block.
-  if (sentences.length === 0 && plainText.trim().length > 0) {
-    const trimmedText = plainText.trim();
-    return [{ original: trimmedText, cleaned: trimmedText }];
+  // 如果文本为空，直接返回
+  if (!plainText.trim()) {
+    return [];
   }
 
-  // 2. 准备匹配规则
+  // 2. 定义分割规则
+  // 这个正则表达式匹配：
+  // - 各种成对的包裹符及其内容。
+  // - 或，不包含句末标点和换行符的字符序列，后面可选择性地跟着一个句末标点。
+  // - 或，一个独立的换行符。
+  const sentenceUnitRegex =
+    /(\*.*?\*|~.*?~|【.*?】|\[.*?\]|（.*?）|\(.*?\)|“.*?”|‘.*?’|".*?"|'.*?'|[^。！？.!?…\n]+[。！？.!?…\n]?|\n)/g;
+
+  const sentenceUnits = plainText.match(sentenceUnitRegex) || [];
+  const allUnits = sentenceUnits.map(s => s.trim()).filter(Boolean);
+
+  // 如果正则没有匹配到任何东西，但文本不为空，则将整个文本视为一个单元
+  if (allUnits.length === 0 && plainText.trim().length > 0) {
+    allUnits.push(plainText.trim());
+  }
+
+  const sentences = allUnits.map((unit, index) => ({ text: unit, index: index }));
+
+  // 3. 准备匹配规则
   const disabledWords = (settings.disabledWords || '')
     .split(',')
     .map((w: string) => w.trim())
@@ -614,11 +628,10 @@ function extractSentencesWithRules(
     })
     .filter((p): p is RegExp => p !== null);
 
-  // 4. 查找所有匹配规则的句子索引 (now line indices)
+  // 4. 查找所有匹配规则的单元索引
   const matchingIndices = new Set<number>();
   sentences.forEach((sentence, index) => {
     const trimmedSentence = sentence.text.trim();
-    // An empty line shouldn't trigger anything.
     if (trimmedSentence === '') return;
 
     if (disabledWordRegex && disabledWordRegex.test(trimmedSentence)) {
@@ -638,23 +651,18 @@ function extractSentencesWithRules(
 
   // 5. 为短句子扩展上下文
   const finalIndices = new Set<number>();
-  const expansionTriggered = new Set<number>(); // Track original short sentences
+  const expansionTriggered = new Set<number>(); // 追踪触发扩展的短句
   matchingIndices.forEach(index => {
     finalIndices.add(index);
-    // 仅在检查长度时移除引号和空格
     const lengthCheckSentence = (sentences[index]?.text || '').trim().replace(/["'“‘”’]/g, '');
     if (lengthCheckSentence.length > 0 && lengthCheckSentence.length < 10) {
-      expansionTriggered.add(index); // Mark this as a short sentence trigger
-      if (index > 0) {
-        finalIndices.add(index - 1);
-      }
-      if (index < sentences.length - 1) {
-        finalIndices.add(index + 1);
-      }
+      expansionTriggered.add(index);
+      if (index > 0) finalIndices.add(index - 1);
+      if (index < sentences.length - 1) finalIndices.add(index + 1);
     }
   });
 
-  // 6. 将连续的句子索引分组
+  // 6. 将连续的单元索引分组
   const sortedIndices = Array.from(finalIndices).sort((a, b) => a - b);
   if (sortedIndices.length === 0) {
     return [];
@@ -662,7 +670,6 @@ function extractSentencesWithRules(
   const groups: number[][] = [];
   let currentGroup: number[] = [sortedIndices[0]];
   for (let i = 1; i < sortedIndices.length; i++) {
-    // Group consecutive lines
     if (sortedIndices[i] === sortedIndices[i - 1] + 1) {
       currentGroup.push(sortedIndices[i]);
     } else {
@@ -672,52 +679,34 @@ function extractSentencesWithRules(
   }
   groups.push(currentGroup);
 
-  // 7. 合并并处理最终的句子，保留顺序
+  // 7. 合并并处理最终的句子
   const finalSentences: { original: string; cleaned: string }[] = [];
-  const processedIndices = new Set<number>();
   groups.forEach(group => {
-    if (group.some(index => processedIndices.has(index))) {
-      return;
-    }
-    // Join the original lines with newlines to preserve structure.
-    const originalSentence = group.map(index => sentences[index].text).join('\n');
+    const isShortSentenceCase = group.some(index => expansionTriggered.has(index));
+    // 对于短句，用换行符连接以保留结构。否则，使用空格。
+    const joiner = isShortSentenceCase ? '\n' : ' ';
+    const originalSentence = group.map(index => sentences[index].text).join(joiner);
 
-    // Don't process empty blocks.
     if (originalSentence.trim()) {
       let cleanedSentence = originalSentence;
 
-      // A group is a "short sentence case" if it was expanded because of a short sentence.
-      // Otherwise, it's a "long sentence case".
-      const isShortSentenceCase = group.some(index => expansionTriggered.has(index));
-
-      // Per user request:
-      // - Long sentences (>10 chars): REMOVE brackets.
-      // - Short sentences (<=10 chars) that get expanded: KEEP brackets.
-      // Therefore, we strip brackets only if it's NOT a short sentence case.
+      // 仅在非短句扩展的情况下移除外部括号
       if (!isShortSentenceCase) {
-        // This logic is complex and might be better applied to the cleaned version only.
-        // For now, let's apply it as it was.
         const bracketPairs = [
           { open: '【', close: '】' },
           { open: '[', close: ']' },
-          { open: '(', close: ')' },
-          { open: '（', close: '）' },
-          { open: '{', close: '}' },
-          { open: '"', close: '"' },
-          { open: "'", close: "'" },
-          { open: '“', close: '”' },
+          { open: '(', close: ')' }, { open: '（', close: '）' },
+          { open: '{', close: '}' }, { open: '"', close: '"' },
+          { open: "'", close: "'" }, { open: '“', close: '”' },
           { open: '‘', close: '’' },
         ];
-
         let tempCleaned = cleanedSentence.trim();
         let wasModified = true;
         while (wasModified && tempCleaned.length > 1) {
           wasModified = false;
           for (const pair of bracketPairs) {
             if (tempCleaned.startsWith(pair.open) && tempCleaned.endsWith(pair.close)) {
-              tempCleaned = tempCleaned
-                .substring(pair.open.length, tempCleaned.length - pair.close.length)
-                .trim();
+              tempCleaned = tempCleaned.substring(pair.open.length, tempCleaned.length - pair.close.length).trim();
               wasModified = true;
               break;
             }
@@ -725,14 +714,10 @@ function extractSentencesWithRules(
         }
         cleanedSentence = tempCleaned;
       }
-
-      // The final cleaned sentence is the result of the above, trimmed.
+      
       const finalCleanedSentence = cleanedSentence.trim();
-
       if (finalCleanedSentence) {
-        // IMPORTANT: The 'original' must be the verbatim block from the text.
         finalSentences.push({ original: originalSentence, cleaned: finalCleanedSentence });
-        group.forEach(index => processedIndices.add(index));
       }
     }
   });
