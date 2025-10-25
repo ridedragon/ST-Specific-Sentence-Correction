@@ -1,10 +1,16 @@
 {
+<<<<<<< HEAD
   "display_name": "AI 文本优化助手",
   "loading_order": 150,
+=======
+  "display_name": "<插件名称>",
+  "loading_order": 120,
+>>>>>>> 8c5454e65315808762f9c14a67c1ca9eb2421c42
   "requires": [],
   "optional": [],
   "js": "dist/index.js",
   "css": "dist/index.css",
+<<<<<<< HEAD
   "author": "Cline",
   "version": "1.0.0",
   "homePage": "",
@@ -12,5 +18,13 @@
   "i18n": {
     "en": "i18n/en.json",
     "zh-CN": "i18n/zh-CN.json"
+=======
+  "author": "<作者名称>",
+  "version": "1.0.0",
+  "homePage": "<仓库URL>",
+  "auto_update": true,
+  "i18n": {
+    "en": "i18n/en.json"
+>>>>>>> 8c5454e65315808762f9c14a67c1ca9eb2421c42
   }
 }
