@@ -10,6 +10,10 @@ const externals = {
   jquery: '$',
   hljs: 'hljs',
   lodash: '_',
+<<<<<<< HEAD
+=======
+  showdown: 'showdown',
+>>>>>>> 8d429dba37b2547116b89b2bd5608d20fd4e26bd
   toastr: 'toastr',
   '@popperjs/core': 'Popper',
 } as const;
@@ -36,6 +40,11 @@ export default defineConfig(({ mode }) => ({
         'pinia',
         '@vueuse/core',
         { from: '@sillytavern/scripts/i18n', imports: ['t'] },
+<<<<<<< HEAD
+=======
+        { from: 'klona', imports: ['klona'] },
+        { from: 'vue-final-modal', imports: ['useModal'] },
+>>>>>>> 8d429dba37b2547116b89b2bd5608d20fd4e26bd
         { from: 'zod', imports: ['z'] },
       ],
       dirs: [{ glob: './src/panel/composable', types: true }],
@@ -43,12 +52,21 @@ export default defineConfig(({ mode }) => ({
     unpluginVueComponents({
       dts: true,
       syncMode: 'overwrite',
+<<<<<<< HEAD
       resolvers: [VueUseComponentsResolver(), VueUseDirectiveResolver()],
       // globs: ['src/panel/component/*.vue'],
     }),
     {
       name: 'sillytavern_resolver',
       enforce: 'post',
+=======
+      // globs: ['src/panel/component/*.vue'],
+      resolvers: [VueUseComponentsResolver(), VueUseDirectiveResolver()],
+    }),
+    {
+      name: 'sillytavern_resolver',
+      enforce: 'pre',
+>>>>>>> 8d429dba37b2547116b89b2bd5608d20fd4e26bd
       resolveId(id) {
         if (id.startsWith('@sillytavern/')) {
           return {
@@ -86,7 +104,11 @@ export default defineConfig(({ mode }) => ({
     },
 
     outDir: 'dist',
+<<<<<<< HEAD
     emptyOutDir: true,
+=======
+    emptyOutDir: false,
+>>>>>>> 8d429dba37b2547116b89b2bd5608d20fd4e26bd
 
     sourcemap: mode === 'production' ? true : 'inline',
 
