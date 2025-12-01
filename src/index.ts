@@ -1,6 +1,6 @@
 import '@/global.css';
 import { initPanel } from '@/panel';
-import { initialize, manualOptimize, optimizeText, replaceMessage } from '@/core';
+import { abortOptimization, initialize, manualOptimize, optimizeText, replaceMessage } from '@/core';
 
 // 将核心功能暴露到全局，以便其他脚本可以调用
 // 使用一个唯一的命名空间来避免冲突
@@ -11,6 +11,7 @@ Object.assign((window as any).aiOptimizer, {
   manualOptimize,
   optimizeText,
   replaceMessage,
+  abortOptimization,
 });
 
 $(() => {
