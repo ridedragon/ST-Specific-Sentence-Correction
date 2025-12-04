@@ -1,5 +1,6 @@
 declare const hljs: typeof import('highlight.js').default;
 declare const Popper: typeof import('@popperjs/core');
+<<<<<<< HEAD
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
@@ -7,3 +8,5 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+=======
+>>>>>>> dfff5332eda009b272d5cb7dcf0dcd56c0482b2f
