@@ -1,5 +1,8 @@
+<<<<<<< HEAD
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+=======
+>>>>>>> f2059e13b51e6c2696adccf1228a5510a7d4755c
 import js from '@eslint/js';
 import tsParser from '@typescript-eslint/parser';
 import eslintConfigPrettier from 'eslint-config-prettier';
@@ -12,8 +15,11 @@ import globals from 'globals';
 import ts from 'typescript-eslint';
 import vueParser from 'vue-eslint-parser';
 
+<<<<<<< HEAD
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+=======
+>>>>>>> f2059e13b51e6c2696adccf1228a5510a7d4755c
 /** @type {import('@typescript-eslint/utils').TSESLint.FlatConfig.ConfigFile} */
 export default [
   js.configs.recommended,
@@ -46,7 +52,10 @@ export default [
         parser: tsParser,
         ecmaVersion: 'latest',
         sourceType: 'module',
+<<<<<<< HEAD
         tsconfigRootDir: __dirname,
+=======
+>>>>>>> f2059e13b51e6c2696adccf1228a5510a7d4755c
       },
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -78,12 +87,15 @@ export default [
       '@typescript-eslint/no-unused-vars': 'off',
     },
   },
+<<<<<<< HEAD
   {
     files: ['**/*.d.ts'],
     rules: {
       '@typescript-eslint/ban-types': 'off',
     },
   },
+=======
+>>>>>>> f2059e13b51e6c2696adccf1228a5510a7d4755c
   eslintConfigPrettier,
   globalIgnores(['dist/**', 'node_modules/**', 'eslint.config.mjs', 'postcss.config.js', 'vite.config.ts']),
 ];
