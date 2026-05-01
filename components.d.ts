@@ -8,6 +8,11 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+<<<<<<< HEAD
     CustomSlider: typeof import('./src/components/CustomSlider.vue')['default']
+=======
+    RouterLink: typeof import('vue-router')['RouterLink']
+    RouterView: typeof import('vue-router')['RouterView']
+>>>>>>> 2247ea0afb1297f701ffa6302a224bb4ebb238fb
   }
 }
