@@ -38,12 +38,18 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
+<<<<<<< HEAD
     "auto-imports.d.ts",
     "components.d.ts",
     "src/**/*.ts",
     "src/**/*.vue",
     "../../../../**/*.js",
     "其他资料/**/*.d.ts"
+=======
+    "*.d.ts",
+    "src/**/*.ts",
+    "../../../../**/*.js" // for intelligence
+>>>>>>> aa632cd41984d91f81ccfd47237bc3acf689cc54
   ],
   "exclude": [
     "**/node_modules/**",
