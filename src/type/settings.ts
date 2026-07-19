@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import { z } from 'zod';
 export type Settings = z.infer<typeof Settings>;
 export const Settings = z.object({
@@ -54,3 +55,13 @@ export const Settings = z.object({
 });
 
 export const setting_field = 'ai_text_optimizer';
+=======
+export type Settings = z.infer<typeof Settings>;
+export const Settings = z
+  .object({
+    button_selected: z.boolean().default(false),
+  })
+  .prefault({});
+
+export const setting_field = 'tavern_extension_example';
+>>>>>>> 67191711fc1d3c98fbb012cd46e1ca2e546d5945
