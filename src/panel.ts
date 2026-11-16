@@ -1,7 +1,12 @@
+<<<<<<< HEAD
 import { createPinia } from 'pinia';
 import { App, createApp } from 'vue';
 import Panel from '@/Panel.vue';
 import { initialize } from '@/core';
+=======
+import Panel from '@/Panel.vue';
+import { App } from 'vue';
+>>>>>>> a0a79888653a214809336ac02f8b0255ab8f1526
 
 const app = createApp(Panel);
 
@@ -20,6 +25,7 @@ const i18n = {
 };
 app.use(i18n);
 
+<<<<<<< HEAD
 /**
  * 等待 SillyTavern 核心UI加载完毕，确保所有上下文和API都可用。
  * @returns A promise that resolves when the UI is ready.
@@ -61,4 +67,9 @@ export function initPanel() {
     .catch(error => {
       console.error('[AI Optimizer] Initialization failed:', error);
     });
+=======
+export function initPanel() {
+  const $app = $('<div id="tavern_extension_example">').appendTo('#extensions_settings2');
+  app.mount($app[0]);
+>>>>>>> a0a79888653a214809336ac02f8b0255ab8f1526
 }
